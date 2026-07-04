@@ -15,10 +15,10 @@ promotes model false positives to test-set ground truth) and sits alongside
 
 Usage::
 
-    python trainer/audit_train_labels.py               # dry run
-    python trainer/audit_train_labels.py --apply       # write fixes
-    python trainer/audit_train_labels.py --dirs data/labeled data/augmented
-    python trainer/audit_train_labels.py --verbose     # show context per hit
+    python src/maintenance/audit_train_labels.py               # dry run
+    python src/maintenance/audit_train_labels.py --apply       # write fixes
+    python src/maintenance/audit_train_labels.py --dirs data/labeled data/augmented
+    python src/maintenance/audit_train_labels.py --verbose     # show context per hit
 """
 
 import argparse

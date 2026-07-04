@@ -6,16 +6,16 @@ def _ctx(surface, context="...[x]..."):
 
 
 def test_collect_gold_contexts_dedups_and_keeps_original_surface():
-    from trainer.error_analysis import collect_gold_contexts
+    from src.analysis.error_analysis import collect_gold_contexts
 
     dataset = [
         {
             "text": "GME GME gme $FUTU",
             "entities": [
-                {"start": 0, "end": 3, "label": "ticker"},   # GME
-                {"start": 4, "end": 7, "label": "ticker"},   # GME
+                {"start": 0, "end": 3, "label": "ticker"},  # GME
+                {"start": 4, "end": 7, "label": "ticker"},  # GME
                 {"start": 8, "end": 11, "label": "ticker"},  # gme
-                {"start": 12, "end": 17, "label": "ticker"}, # $FUTU
+                {"start": 12, "end": 17, "label": "ticker"},  # $FUTU
             ],
         }
     ]
@@ -28,18 +28,22 @@ def test_collect_gold_contexts_dedups_and_keeps_original_surface():
 
 
 def test_categorize_errors_splits_fp_fn_and_confusion():
-    from trainer.error_analysis import categorize_errors
+    from src.analysis.error_analysis import categorize_errors
 
-    gold_ctx = [{
-        ("GME", "ticker"): _ctx("GME"),
-        ("SOFI", "ticker"): _ctx("SOFI"),
-        ("FUTU", "ticker"): _ctx("$FUTU"),
-    }]
-    pred_ctx = [{
-        ("GME", "ticker"): _ctx("gme"),       # TP (normalized match)
-        ("SOFI", "company"): _ctx("SOFI"),    # label confusion vs gold ticker
-        ("HERE", "company"): _ctx("here"),    # pure FP
-    }]
+    gold_ctx = [
+        {
+            ("GME", "ticker"): _ctx("GME"),
+            ("SOFI", "ticker"): _ctx("SOFI"),
+            ("FUTU", "ticker"): _ctx("$FUTU"),
+        }
+    ]
+    pred_ctx = [
+        {
+            ("GME", "ticker"): _ctx("gme"),  # TP (normalized match)
+            ("SOFI", "company"): _ctx("SOFI"),  # label confusion vs gold ticker
+            ("HERE", "company"): _ctx("here"),  # pure FP
+        }
+    ]
     dataset = [{"text": "doc text"}]
 
     cats = categorize_errors(pred_ctx, gold_ctx, dataset)

@@ -5,12 +5,12 @@ the updated descriptions reduce FPs before committing to a full training run.
 The model is loaded once; inference runs twice (old vs new descriptions).
 
 Usage:
-    python trainer/validate_descriptions.py                   # latest adapter, old vs new
-    python trainer/validate_descriptions.py --adapter v15
-    python trainer/validate_descriptions.py --adapter base    # base model (no adapter)
-    python trainer/validate_descriptions.py --threshold 0.6
-    python trainer/validate_descriptions.py --show-deltas     # FP/FN diff between variants
-    python trainer/validate_descriptions.py --show-deltas --top 30
+    python src/analysis/validate_descriptions.py                   # latest adapter, old vs new
+    python src/analysis/validate_descriptions.py --adapter v15
+    python src/analysis/validate_descriptions.py --adapter base    # base model (no adapter)
+    python src/analysis/validate_descriptions.py --threshold 0.6
+    python src/analysis/validate_descriptions.py --show-deltas     # FP/FN diff between variants
+    python src/analysis/validate_descriptions.py --show-deltas --top 30
 """
 
 import argparse
@@ -21,30 +21,17 @@ import torch
 from rich.console import Console
 from rich.table import Table
 
-try:
-    from trainer.benchmark import (
-        DEFAULT_TEST_FOLDER,
-        load_base_model,
-        parse_all_label_studio_exports,
-        prepare_eval_inputs,
-    )
-    from trainer.error_analysis import (
-        collect_pred_per_doc,
-        resolve_adapter,
-        run_inference,
-    )
-except ImportError:
-    from benchmark import (
-        DEFAULT_TEST_FOLDER,
-        load_base_model,
-        parse_all_label_studio_exports,
-        prepare_eval_inputs,
-    )
-    from error_analysis import (
-        collect_pred_per_doc,
-        resolve_adapter,
-        run_inference,
-    )
+from src.analysis.error_analysis import (
+    collect_pred_per_doc,
+    resolve_adapter,
+    run_inference,
+)
+from src.core.benchmark import (
+    DEFAULT_TEST_FOLDER,
+    load_base_model,
+    parse_all_label_studio_exports,
+    prepare_eval_inputs,
+)
 
 console = Console()
 
@@ -109,7 +96,10 @@ def _delta(old_val, new_val, higher_is_better=True, fmt=".2%"):
 
 
 def _render_comparison(old_m, new_m, label_keys):
-    table = Table(title="Entity description comparison (same model, different prompts)", show_lines=False)
+    table = Table(
+        title="Entity description comparison (same model, different prompts)",
+        show_lines=False,
+    )
     table.add_column("entity", style="blue", width=10)
     table.add_column("metric", width=6)
     table.add_column("old", justify="right")
@@ -117,11 +107,11 @@ def _render_comparison(old_m, new_m, label_keys):
     table.add_column("Δ", justify="right", width=10)
 
     rows = [
-        ("P (precision)",  "p",  True,  ".2%"),
-        ("R (recall)",     "r",  True,  ".2%"),
-        ("F1",             "f1", True,  ".2%"),
-        ("FP count",       "fp", False, "d"),
-        ("FN count",       "fn", False, "d"),
+        ("P (precision)", "p", True, ".2%"),
+        ("R (recall)", "r", True, ".2%"),
+        ("F1", "f1", True, ".2%"),
+        ("FP count", "fp", False, "d"),
+        ("FN count", "fn", False, "d"),
     ]
 
     for key in label_keys + ["overall"]:
@@ -144,7 +134,9 @@ def _render_comparison(old_m, new_m, label_keys):
     return table
 
 
-def _collect_delta_records(old_preds, new_preds, gold_per_doc, dataset, context_chars=40):
+def _collect_delta_records(
+    old_preds, new_preds, gold_per_doc, dataset, context_chars=40
+):
     """Classify spans whose prediction state changed between old and new descriptions.
 
     Returns four lists of dicts (text, label, doc_idx, context):
@@ -174,17 +166,41 @@ def _collect_delta_records(old_preds, new_preds, gold_per_doc, dataset, context_
         new_fn = gold - new_pred
 
         for span in old_fp - new_fp_set:
-            suppressed_fp.append({"text": text[span[0]:span[1]], "label": span[2],
-                                   "doc_idx": doc_idx, "context": ctx(span[0], span[1])})
+            suppressed_fp.append(
+                {
+                    "text": text[span[0] : span[1]],
+                    "label": span[2],
+                    "doc_idx": doc_idx,
+                    "context": ctx(span[0], span[1]),
+                }
+            )
         for span in new_fp_set - old_fp:
-            new_fp_list.append({"text": text[span[0]:span[1]], "label": span[2],
-                                 "doc_idx": doc_idx, "context": ctx(span[0], span[1])})
+            new_fp_list.append(
+                {
+                    "text": text[span[0] : span[1]],
+                    "label": span[2],
+                    "doc_idx": doc_idx,
+                    "context": ctx(span[0], span[1]),
+                }
+            )
         for span in old_fn - new_fn:
-            recovered_fn.append({"text": text[span[0]:span[1]], "label": span[2],
-                                  "doc_idx": doc_idx, "context": ctx(span[0], span[1])})
+            recovered_fn.append(
+                {
+                    "text": text[span[0] : span[1]],
+                    "label": span[2],
+                    "doc_idx": doc_idx,
+                    "context": ctx(span[0], span[1]),
+                }
+            )
         for span in new_fn - old_fn:
-            lost_tp.append({"text": text[span[0]:span[1]], "label": span[2],
-                             "doc_idx": doc_idx, "context": ctx(span[0], span[1])})
+            lost_tp.append(
+                {
+                    "text": text[span[0] : span[1]],
+                    "label": span[2],
+                    "doc_idx": doc_idx,
+                    "context": ctx(span[0], span[1]),
+                }
+            )
 
     return suppressed_fp, new_fp_list, recovered_fn, lost_tp
 
@@ -208,15 +224,22 @@ def _render_delta_table(title, records, top):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--adapter", default="latest",
-                        help="'latest' (default), 'base', or version like 'v15'.")
+    parser.add_argument(
+        "--adapter",
+        default="latest",
+        help="'latest' (default), 'base', or version like 'v15'.",
+    )
     parser.add_argument("--threshold", type=float, default=0.75)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--test-folder", default=DEFAULT_TEST_FOLDER)
-    parser.add_argument("--show-deltas", action="store_true",
-                        help="Print per-entity tables of FP/FN changes between variants.")
-    parser.add_argument("--top", type=int, default=20,
-                        help="Max rows per delta table (default 20).")
+    parser.add_argument(
+        "--show-deltas",
+        action="store_true",
+        help="Print per-entity tables of FP/FN changes between variants.",
+    )
+    parser.add_argument(
+        "--top", type=int, default=20, help="Max rows per delta table (default 20)."
+    )
     args = parser.parse_args()
 
     adapter_name, adapter_path = resolve_adapter(args.adapter)
@@ -226,7 +249,9 @@ def main():
         raise SystemExit(1)
 
     label_keys = list(OLD_DESCRIPTIONS.keys())
-    flat_chunks, doc_chunk_ranges, gold_per_doc, _ = prepare_eval_inputs(dataset, label_keys)
+    flat_chunks, doc_chunk_ranges, gold_per_doc, _ = prepare_eval_inputs(
+        dataset, label_keys
+    )
     total_gold = sum(len(g) for g in gold_per_doc)
     console.print(
         f"Adapter : [bold cyan]{adapter_name}[/bold cyan]\n"
@@ -244,7 +269,9 @@ def main():
 
     run_results = {}
     for variant, descriptions in [("old", OLD_DESCRIPTIONS), ("new", NEW_DESCRIPTIONS)]:
-        console.print(f"[cyan]Inference with [bold]{variant}[/bold] descriptions...[/cyan]")
+        console.print(
+            f"[cyan]Inference with [bold]{variant}[/bold] descriptions...[/cyan]"
+        )
         outputs = run_inference(
             model, flat_chunks, descriptions, args.threshold, args.batch_size
         )
@@ -255,11 +282,13 @@ def main():
         }
 
     console.print()
-    console.print(_render_comparison(
-        run_results["old"]["metrics"],
-        run_results["new"]["metrics"],
-        label_keys,
-    ))
+    console.print(
+        _render_comparison(
+            run_results["old"]["metrics"],
+            run_results["new"]["metrics"],
+            label_keys,
+        )
+    )
 
     if args.show_deltas:
         suppressed_fp, new_fp_list, recovered_fn, lost_tp = _collect_delta_records(
@@ -274,29 +303,41 @@ def main():
                 "[dim]No prediction differences between old and new descriptions on this test set.[/dim]"
             )
         if suppressed_fp:
-            console.print(_render_delta_table(
-                f"Suppressed FPs — old hallucinated, new correctly skipped "
-                f"({len(suppressed_fp)} instances, {len(set((r['text'], r['label']) for r in suppressed_fp))} unique)",
-                suppressed_fp, args.top,
-            ))
+            console.print(
+                _render_delta_table(
+                    f"Suppressed FPs — old hallucinated, new correctly skipped "
+                    f"({len(suppressed_fp)} instances, {len(set((r['text'], r['label']) for r in suppressed_fp))} unique)",
+                    suppressed_fp,
+                    args.top,
+                )
+            )
         if new_fp_list:
-            console.print(_render_delta_table(
-                f"New FPs — regressions introduced by new descriptions "
-                f"({len(new_fp_list)} instances)",
-                new_fp_list, args.top,
-            ))
+            console.print(
+                _render_delta_table(
+                    f"New FPs — regressions introduced by new descriptions "
+                    f"({len(new_fp_list)} instances)",
+                    new_fp_list,
+                    args.top,
+                )
+            )
         if recovered_fn:
-            console.print(_render_delta_table(
-                f"Recovered FNs — new descriptions found previously-missed entities "
-                f"({len(recovered_fn)} instances)",
-                recovered_fn, args.top,
-            ))
+            console.print(
+                _render_delta_table(
+                    f"Recovered FNs — new descriptions found previously-missed entities "
+                    f"({len(recovered_fn)} instances)",
+                    recovered_fn,
+                    args.top,
+                )
+            )
         if lost_tp:
-            console.print(_render_delta_table(
-                f"Lost TPs — regressions: old found correctly, new now misses "
-                f"({len(lost_tp)} instances)",
-                lost_tp, args.top,
-            ))
+            console.print(
+                _render_delta_table(
+                    f"Lost TPs — regressions: old found correctly, new now misses "
+                    f"({len(lost_tp)} instances)",
+                    lost_tp,
+                    args.top,
+                )
+            )
 
     if device == "cuda":
         del model

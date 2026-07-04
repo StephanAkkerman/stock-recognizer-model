@@ -9,9 +9,9 @@ dictionaries as the source of truth:
 
 Run::
 
-    python trainer/fix_label_policy.py                      # dry run
-    python trainer/fix_label_policy.py --apply              # write fixes
-    python trainer/fix_label_policy.py --dirs data/labeled  # one folder only
+    python src/maintenance/fix_label_policy.py                      # dry run
+    python src/maintenance/fix_label_policy.py --apply              # write fixes
+    python src/maintenance/fix_label_policy.py --dirs data/labeled  # one folder only
 """
 
 import argparse
@@ -81,7 +81,18 @@ REMOVE_SET = {
     "AI",
     "ML",
     # Month abbreviations — used in options notation ("AUG 19 calls", "OCT 21 puts")
-    "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
     # Media outlets with no public ticker
     "CNBC",
     "MSNBC",

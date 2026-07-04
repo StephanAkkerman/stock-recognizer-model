@@ -56,7 +56,7 @@ This fix applies to production output immediately, independent of which adapter 
 
 ### 4. Retrain
 
-Run `python trainer/train.py` after the description changes. This produces a new adapter (v14) trained with the corrected descriptions. The post-train benchmark runs automatically and writes to `benchmark_results.json`.
+Run `python src/core/train.py` after the description changes. This produces a new adapter (v14) trained with the corrected descriptions. The post-train benchmark runs automatically and writes to `benchmark_results.json`.
 
 ### 5. Follow-up: Engine-aware benchmark mode
 
@@ -83,7 +83,7 @@ Reaching 80% F1 will still require additional labeled data for the top missed en
 
 | File | Change |
 |------|--------|
-| `trainer/train.py` | Replace `ENTITY_DESCRIPTIONS` |
-| `utils/auto_label.py` | Update `SYSTEM_INSTRUCTIONS`, extend `FEW_SHOT_EXAMPLES` |
+| `src/core/train.py` | Replace `ENTITY_DESCRIPTIONS` |
+| `utils/synthetic/auto_label.py` | Update `SYSTEM_INSTRUCTIONS`, extend `FEW_SHOT_EXAMPLES` |
 | `stock_recognizer/engine.py` | Add post-processing guard in `recognize_ai()` |
-| `trainer/benchmark.py` | Add `--engine` flag (follow-up) |
+| `src/core/benchmark.py` | Add `--engine` flag (follow-up) |

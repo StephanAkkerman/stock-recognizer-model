@@ -8,7 +8,7 @@ For each existing adapter folder this script:
   3. Uses the adapter weight file's mtime as a `timestamp` proxy.
   4. Writes `training_metadata.json` next to the adapter.
 
-Re-run `python trainer/benchmark.py` afterward — its `_load_training_metadata`
+Re-run `python src/core/benchmark.py` afterward — its `_load_training_metadata`
 path will pick up the new files and persist the params into the store.
 
 This is a one-shot. v14+ adapters get the same file written automatically by
@@ -368,7 +368,7 @@ def main():
             console.print(f"  v{v}: {reason}")
 
     console.print(
-        "\n[cyan]Next:[/cyan] run `python trainer/benchmark.py` so the new "
+        "\n[cyan]Next:[/cyan] run `python src/core/benchmark.py` so the new "
         "params land in models/benchmark_results.json."
     )
 

@@ -2,22 +2,22 @@
 
 Workflow (manual mode — recommended for the first batch):
   Single post:
-    1) `python utils/auto_label.py --post-index 0 --print-prompt > prompt.txt`
+        1) `python utils/synthetic/auto_label.py --post-index 0 --print-prompt > prompt.txt`
     2) Paste prompt.txt into your LLM, save the JSON reply as response.json
-    3) `python utils/auto_label.py --post-index 0 --response-file response.json`
+        3) `python utils/synthetic/auto_label.py --post-index 0 --response-file response.json`
 
   Batch (recommended for long-context models like Gemini):
-    1) `python utils/auto_label.py --posts 0-9 --print-prompt > prompt.txt`
+    1) `python utils/synthetic/auto_label.py --posts 0-9 --print-prompt > prompt.txt`
     2) Paste prompt.txt into the LLM, save the JSON reply as response.json
-    3) `python utils/auto_label.py --posts 0-9 --response-file response.json`
+    3) `python utils/synthetic/auto_label.py --posts 0-9 --response-file response.json`
 
   The batch output shape is `{"results": [{"index": N, "entities": [...]}, ...]}`
   with one entry per input. Re-running with the same --posts overwrites those
   task IDs rather than duplicating them.
 
   Interactive mode (loop through everything without juggling files):
-    `python utils/auto_label.py --interactive [--batch-size 10]`
-    `python utils/auto_label.py --interactive --batch-chars 40000`
+    `python utils/synthetic/auto_label.py --interactive [--batch-size 10]`
+    `python utils/synthetic/auto_label.py --interactive --batch-chars 40000`
     Each round writes the prompt to --prompt-file (default
     data/auto_label/prompt.txt); copy it into your LLM, paste the JSON reply
     back in the terminal, then type END on its own line (or `q` to quit).

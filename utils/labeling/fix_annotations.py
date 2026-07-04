@@ -8,9 +8,9 @@
    e.g. GME and AMC always "ticker", never "company".
 
 Usage:
-    python utils/fix_annotations.py                         # dry-run: preview only
-    python utils/fix_annotations.py --apply                 # write files in-place
-    python utils/fix_annotations.py --folders data/labeled  # one folder only
+    python utils/labeling/fix_annotations.py                         # dry-run: preview only
+    python utils/labeling/fix_annotations.py --apply                 # write files in-place
+    python utils/labeling/fix_annotations.py --folders data/labeled  # one folder only
 """
 
 import argparse
@@ -18,7 +18,6 @@ import glob
 import json
 import os
 import shutil
-from collections import defaultdict
 
 # Entities whose label should be normalized to a single canonical value.
 # Add entries here whenever error_analysis reveals systematic ticker↔company
@@ -31,7 +30,7 @@ NORMALIZE_LABEL = {
 # Use chr() so these survive editors that silently convert quote characters.
 _RQUOTE = chr(0x2019)  # RIGHT SINGLE QUOTATION MARK  (most common in pasted text)
 _LQUOTE = chr(0x2018)  # LEFT SINGLE QUOTATION MARK
-_APOS = chr(39)        # APOSTROPHE U+0027 (plain ASCII)
+_APOS = chr(39)  # APOSTROPHE U+0027 (plain ASCII)
 
 
 def _norm_apos(text):

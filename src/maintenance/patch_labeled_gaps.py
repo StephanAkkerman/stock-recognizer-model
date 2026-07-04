@@ -9,10 +9,10 @@ into the Label Studio JSON files.
 Usage::
 
     # Dry run — show what would be patched
-    python trainer/patch_labeled_gaps.py
+    python src/maintenance/patch_labeled_gaps.py
 
     # Apply patches
-    python trainer/patch_labeled_gaps.py --apply
+    python src/maintenance/patch_labeled_gaps.py --apply
 """
 
 from __future__ import annotations
@@ -23,10 +23,7 @@ import json
 import re
 import sys
 
-try:
-    from trainer.patch_test_labels import find_entity_span, make_ls_result
-except ImportError:
-    from patch_test_labels import find_entity_span, make_ls_result
+from src.maintenance.patch_test_labels import find_entity_span, make_ls_result
 
 # Tickers confirmed to be annotation gaps (engine is correct, gold missed them).
 TARGET_TICKERS = {"GOOGL", "UBER", "BYND", "SPOT", "RDDT"}
@@ -46,14 +43,18 @@ def load_labeled_docs_with_provenance(folder: str) -> list[dict]:
         with open(file_path, encoding="utf-8") as f:
             tasks = json.load(f)
         for task_idx, task in enumerate(tasks):
-            if not task.get("annotations") or task["annotations"][0].get("was_cancelled"):
+            if not task.get("annotations") or task["annotations"][0].get(
+                "was_cancelled"
+            ):
                 continue
-            docs.append({
-                "text": task["data"]["text"],
-                "_file": file_path,
-                "_task_idx": task_idx,
-                "_task_id": task.get("id"),
-            })
+            docs.append(
+                {
+                    "text": task["data"]["text"],
+                    "_file": file_path,
+                    "_task_idx": task_idx,
+                    "_task_id": task.get("id"),
+                }
+            )
     return docs
 
 
@@ -61,19 +62,26 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--errors", default=ERRORS_FILE)
     parser.add_argument("--labeled-folder", default=LABELED_FOLDER)
-    parser.add_argument("--apply", action="store_true",
-                        help="Write patches to the Label Studio JSON files.")
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write patches to the Label Studio JSON files.",
+    )
     args = parser.parse_args()
 
     with open(args.errors, encoding="utf-8") as f:
         error_data = json.load(f)
 
     if error_data.get("mode") != "engine":
-        sys.exit(f"Expected engine-mode error JSON, got mode={error_data.get('mode')!r}")
+        sys.exit(
+            f"Expected engine-mode error JSON, got mode={error_data.get('mode')!r}"
+        )
 
     target_fps = [r for r in error_data["fp"] if r["text"] in TARGET_TICKERS]
-    print(f"Found {len(target_fps)} FP records for target tickers: "
-          f"{sorted({r['text'] for r in target_fps})}")
+    print(
+        f"Found {len(target_fps)} FP records for target tickers: "
+        f"{sorted({r['text'] for r in target_fps})}"
+    )
 
     docs = load_labeled_docs_with_provenance(args.labeled_folder)
     print(f"Loaded {len(docs)} labeled documents from {args.labeled_folder}")
@@ -102,14 +110,18 @@ def main() -> None:
             span = find_entity_span(doc_text, f"${ticker}", context)
 
         if span is None:
-            print(f"  WARNING: could not locate [{ticker}] span in doc {doc_idx} — skipped")
+            print(
+                f"  WARNING: could not locate [{ticker}] span in doc {doc_idx} — skipped"
+            )
             skipped.append(record)
             continue
 
         start, end = span
         surface = doc_text[start:end]
-        print(f"  doc {doc_idx:4d}  {ticker}  [{start}:{end}]  {surface!r:12s}  "
-              f"{context[:70]}")
+        print(
+            f"  doc {doc_idx:4d}  {ticker}  [{start}:{end}]  {surface!r:12s}  "
+            f"{context[:70]}"
+        )
 
         entry = {
             "task_idx": doc["_task_idx"],
@@ -145,8 +157,11 @@ def main() -> None:
                 for r in result
             )
             if not already:
-                result.append(make_ls_result(patch["start"], patch["end"],
-                                             patch["label"], patch["text"]))
+                result.append(
+                    make_ls_result(
+                        patch["start"], patch["end"], patch["label"], patch["text"]
+                    )
+                )
                 added += 1
 
         with open(file_path, "w", encoding="utf-8") as f:

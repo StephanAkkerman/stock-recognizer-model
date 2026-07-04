@@ -16,26 +16,15 @@ from rich.progress import (
 )
 from rich.table import Table
 
-try:
-    from trainer.results_store import (
-        compute_test_set_hash,
-        derive_adapter_params,
-        get_cached,
-        load_store,
-        put_result,
-        register_test_set,
-        save_store,
-    )
-except ImportError:
-    from results_store import (
-        compute_test_set_hash,
-        derive_adapter_params,
-        get_cached,
-        load_store,
-        put_result,
-        register_test_set,
-        save_store,
-    )
+from src.core.results_store import (
+    compute_test_set_hash,
+    derive_adapter_params,
+    get_cached,
+    load_store,
+    put_result,
+    register_test_set,
+    save_store,
+)
 
 DEFAULT_TEST_FOLDER = "data/test"
 DEFAULT_LABELS = {
@@ -768,7 +757,12 @@ if __name__ == "__main__":
             store_dirty = False
             for adapter in available_adapters:
                 entry = store["results"].get(adapter["name"], {}).get(test_hash)
-                if entry and entry.get("engine_metrics") and not args.no_cache and not args.no_engine_cache:
+                if (
+                    entry
+                    and entry.get("engine_metrics")
+                    and not args.no_cache
+                    and not args.no_engine_cache
+                ):
                     eng_metrics = entry["engine_metrics"]
                     console.print(
                         f"  [dim]{adapter['name']}: using cached engine metrics[/dim]"

@@ -12,10 +12,10 @@ real tickers, leaving nothing after the entity filter.
 Requires REDDIT_* env vars (same as scraper.py).
 
 Run:
-    python utils/mine_abbrev_negatives.py
-    python utils/mine_abbrev_negatives.py --n 200 --dry-run
-    python utils/mine_abbrev_negatives.py --output data/labeled/abbrev_negatives.json
-    python utils/mine_abbrev_negatives.py --subreddits personalfinance investing
+    python utils/scraping/mine_abbrev_negatives.py
+    python utils/scraping/mine_abbrev_negatives.py --n 200 --dry-run
+    python utils/scraping/mine_abbrev_negatives.py --output data/labeled/abbrev_negatives.json
+    python utils/scraping/mine_abbrev_negatives.py --subreddits personalfinance investing
 """
 
 import argparse
@@ -28,18 +28,16 @@ import re
 import financedatabase as fd
 from rich.console import Console
 from rich.table import Table
-
 from stock_recognizer.constants import AMBIGUOUS_WORDS, EXCHANGE_BLACKLIST
 from stock_recognizer.engine import StockRecognizer
 
-try:
-    from utils.cleaner import clean_reddit_markdown
-    from utils.mine_hard_negatives import CASHTAG_RE, collect_seen_hashes, normalize_for_dedup
-    from utils.scraper import RedditScraper
-except ImportError:
-    from cleaner import clean_reddit_markdown
-    from mine_hard_negatives import CASHTAG_RE, collect_seen_hashes, normalize_for_dedup
-    from scraper import RedditScraper
+from utils.labeling.cleaner import clean_reddit_markdown
+from utils.scraping.mine_hard_negatives import (
+    CASHTAG_RE,
+    collect_seen_hashes,
+    normalize_for_dedup,
+)
+from utils.scraping.scraper import RedditScraper
 
 console = Console()
 

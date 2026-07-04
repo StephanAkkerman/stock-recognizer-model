@@ -22,13 +22,13 @@ This script automates the fix:
 Usage::
 
     # Dry run — show candidates without writing anything
-    python trainer/patch_test_labels.py --errors errors_v17.json
+    python src/maintenance/patch_test_labels.py --errors errors_v17.json
 
     # Apply approved additions to the test-set JSON files
-    python trainer/patch_test_labels.py --errors errors_v17.json --apply
+    python src/maintenance/patch_test_labels.py --errors errors_v17.json --apply
 
     # Skip interactive review and auto-apply all engine-validated hits
-    python trainer/patch_test_labels.py --errors errors_v17.json --apply --auto
+    python src/maintenance/patch_test_labels.py --errors errors_v17.json --apply --auto
 """
 
 from __future__ import annotations
@@ -48,29 +48,105 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 FINANCIAL_ABBREV_BLOCKLIST = {
     # Trading rules / regulatory
-    "PDT", "FINRA", "SEC", "CFTC", "DTCC", "DTC", "OCC", "SIPC", "FDIC",
-    "NDAA", "FTC", "DOJ", "DOW",
+    "PDT",
+    "FINRA",
+    "SEC",
+    "CFTC",
+    "DTCC",
+    "DTC",
+    "OCC",
+    "SIPC",
+    "FDIC",
+    "NDAA",
+    "FTC",
+    "DOJ",
+    "DOW",
     # Financial metrics / jargon
-    "EV", "EBIT", "EBITDA", "FCF", "PE", "PS", "PB", "EPS", "BPS", "DPS",
-    "NAV", "AUM", "ROE", "ROI", "ROA", "CAGR", "WACC", "DCF", "IRR",
-    "SGA", "SGNA", "PT", "TP", "YOY", "QOQ", "TTM", "LTM", "NTM",
-    "EOY", "EOQ", "YTD", "MTD",
+    "EV",
+    "EBIT",
+    "EBITDA",
+    "FCF",
+    "PE",
+    "PS",
+    "PB",
+    "EPS",
+    "BPS",
+    "DPS",
+    "NAV",
+    "AUM",
+    "ROE",
+    "ROI",
+    "ROA",
+    "CAGR",
+    "WACC",
+    "DCF",
+    "IRR",
+    "SGA",
+    "SGNA",
+    "PT",
+    "TP",
+    "YOY",
+    "QOQ",
+    "TTM",
+    "LTM",
+    "NTM",
+    "EOY",
+    "EOQ",
+    "YTD",
+    "MTD",
     # Options / derivatives
-    "ATM", "OTM", "ITM", "IV", "VIX", "VWAP",
+    "ATM",
+    "OTM",
+    "ITM",
+    "IV",
+    "VIX",
+    "VWAP",
     # Generic acronyms appearing in financial posts
-    "RSU", "RSUS", "ISO", "ESO", "ESPP", "PSA", "AMA", "IMO", "AFAIK",
+    "RSU",
+    "RSUS",
+    "ISO",
+    "ESO",
+    "ESPP",
+    "PSA",
+    "AMA",
+    "IMO",
+    "AFAIK",
     "IPO",  # keep this? It IS relevant context but not an entity itself
-    "AI",   # generic tech term
-    "ML", "NLP", "LLM",
+    "AI",  # generic tech term
+    "ML",
+    "NLP",
+    "LLM",
     # Technology / product codenames that appear in chip/tech DDs
-    "EUV", "DRAM", "NAND", "GPU", "CPU", "HBM", "LPBF",
+    "EUV",
+    "DRAM",
+    "NAND",
+    "GPU",
+    "CPU",
+    "HBM",
+    "LPBF",
     # Japanese ministry acronyms
-    "MEXT", "METI",
+    "MEXT",
+    "METI",
     # Month abbreviations — used in options notation ("AUG 19 calls", "OCT 21 puts").
     # Block these even when written as "$ AUG" with a stray space before the letters.
-    "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
     # Misc
-    "CA", "HQ", "US", "UK", "EU",
+    "CA",
+    "HQ",
+    "US",
+    "UK",
+    "EU",
 }
 
 # ---------------------------------------------------------------------------
@@ -79,41 +155,41 @@ FINANCIAL_ABBREV_BLOCKLIST = {
 # text.
 # ---------------------------------------------------------------------------
 COMPANY_BLOCKLIST = {
-    "arm",          # "Amazon's cloud arm" ≠ Arm Holdings
-    "go",           # "go short" ≠ Genie Energy
-    "air",          # "thin air" ≠ Air Industries
-    "might",        # verb, not a ticker
-    "fukd",         # slang
-    "pamp",         # slang
-    "ish",          # suffix
-    "amirite",      # internet slang
-    "artice",       # typo for "article"
-    "pink slip",    # idiom
-    "burry",        # person (Michael Burry), not a publicly traded company
-    "chatgpt",      # product, not a company
-    "the verge",    # media outlet; no stock
+    "arm",  # "Amazon's cloud arm" ≠ Arm Holdings
+    "go",  # "go short" ≠ Genie Energy
+    "air",  # "thin air" ≠ Air Industries
+    "might",  # verb, not a ticker
+    "fukd",  # slang
+    "pamp",  # slang
+    "ish",  # suffix
+    "amirite",  # internet slang
+    "artice",  # typo for "article"
+    "pink slip",  # idiom
+    "burry",  # person (Michael Burry), not a publicly traded company
+    "chatgpt",  # product, not a company
+    "the verge",  # media outlet; no stock
     # "reddit" is intentionally NOT blocked — Reddit (RDDT) is a public company
     "sahmcapital.com",
-    "lumenai",      # unverifiable private startup
+    "lumenai",  # unverifiable private startup
     "controversialclub",
     "nufacturers",  # truncated word
-    "giga factory", # facility description
+    "giga factory",  # facility description
     "laser powder bed fusion",  # manufacturing process
     "rapid production solutions",  # Velo3D internal division name
-    "big pharma",   # generic category
+    "big pharma",  # generic category
     "defined capital",
     "convexity",
     "sg&a",
-    "united waste", # private company sold; no ticker
-    "bloomberg",    # Bloomberg L.P. is private; no publicly traded stock
+    "united waste",  # private company sold; no ticker
+    "bloomberg",  # Bloomberg L.P. is private; no publicly traded stock
     # Common English words that happen to match obscure ticker symbols
-    "circle",       # "circle jerk" etc.
-    "go",           # "go short"
-    "air",          # "thin air"
-    "prime",        # "Amazon Prime" or generic adjective
-    "link",         # generic word
-    "real",         # generic adjective
-    "core",         # generic word
+    "circle",  # "circle jerk" etc.
+    "go",  # "go short"
+    "air",  # "thin air"
+    "prime",  # "Amazon Prime" or generic adjective
+    "link",  # generic word
+    "real",  # generic adjective
+    "core",  # generic word
 }
 
 
@@ -129,7 +205,9 @@ def load_test_with_provenance(folder: str):
         with open(file_path, encoding="utf-8") as f:
             tasks = json.load(f)
         for task_idx, task in enumerate(tasks):
-            if not task.get("annotations") or task["annotations"][0].get("was_cancelled"):
+            if not task.get("annotations") or task["annotations"][0].get(
+                "was_cancelled"
+            ):
                 continue
             text = task["data"]["text"]
             result.append(
@@ -204,7 +282,11 @@ def find_entity_span(
             return hit
 
     # Last resort: find all occurrences of the entity text
-    all_pos = [i for i in range(len(doc_text)) if doc_text[i : i + len(entity_clean)] == entity_clean]
+    all_pos = [
+        i
+        for i in range(len(doc_text))
+        if doc_text[i : i + len(entity_clean)] == entity_clean
+    ]
     if len(all_pos) == 1:
         return all_pos[0], all_pos[0] + len(entity_clean)
 
@@ -310,7 +392,9 @@ def apply_patches(approved: list[dict], labeled_folder: str) -> None:
     for c in approved:
         task_id = c.get("_task_id")
         if task_id is None or task_id not in labeled_index:
-            print(f"  WARNING: task id={task_id!r} not found in {labeled_folder}, skipping")
+            print(
+                f"  WARNING: task id={task_id!r} not found in {labeled_folder}, skipping"
+            )
             continue
         file_path, task_idx_in_labeled = labeled_index[task_id]
         entry = dict(c)
@@ -336,7 +420,9 @@ def apply_patches(approved: list[dict], labeled_folder: str) -> None:
             )
             if not already_there:
                 result.append(
-                    make_ls_result(patch["start"], patch["end"], patch["label"], patch["text"])
+                    make_ls_result(
+                        patch["start"], patch["end"], patch["label"], patch["text"]
+                    )
                 )
 
         with open(file_path, "w", encoding="utf-8") as f:
@@ -350,7 +436,7 @@ def main() -> None:
     parser.add_argument(
         "--errors",
         required=True,
-        help="Path to the error JSON from error_analysis.py --save-json",
+        help="Path to the error JSON from src/analysis/error_analysis.py --save-json",
     )
     parser.add_argument(
         "--test-folder",
@@ -449,7 +535,9 @@ def main() -> None:
 
     print("Candidates:")
     for c in candidates:
-        print(f"  [{c['label']:7s}] {c['text']!r:25s} @ {c['start']}:{c['end']}  {c['context'][:80]}")
+        print(
+            f"  [{c['label']:7s}] {c['text']!r:25s} @ {c['start']}:{c['end']}  {c['context'][:80]}"
+        )
 
     if args.apply:
         if args.auto:
@@ -461,7 +549,9 @@ def main() -> None:
         if approved:
             print(f"\nApplying {len(approved)} addition(s)…")
             apply_patches(approved, args.labeled_folder)
-            print("Done. Re-run split_test_set.py then benchmark to see updated metrics.")
+            print(
+                "Done. Re-run split_test_set.py then benchmark to see updated metrics."
+            )
         else:
             print("No additions approved.")
     else:

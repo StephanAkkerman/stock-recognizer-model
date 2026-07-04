@@ -3,13 +3,13 @@
 Hard negatives are posts that contain *ticker-shaped* tokens (`BUY`, `CNBC`,
 `JPOW`, `YOLO`, ...) but no real entities. Training on them teaches the model
 that capitalized 2-6 letter words aren't automatically entities — directly
-attacking the FP modes surfaced by `trainer/error_analysis.py`.
+attacking the FP modes surfaced by `src/analysis/error_analysis.py`.
 
 Run:
-    python utils/mine_hard_negatives.py                       # default: 300 negatives
-    python utils/mine_hard_negatives.py --n 500
-    python utils/mine_hard_negatives.py --dry-run             # print stats, write nothing
-    python utils/mine_hard_negatives.py --output data/labeled/negatives_v2.json
+    python utils/scraping/mine_hard_negatives.py                       # default: 300 negatives
+    python utils/scraping/mine_hard_negatives.py --n 500
+    python utils/scraping/mine_hard_negatives.py --dry-run             # print stats, write nothing
+    python utils/scraping/mine_hard_negatives.py --output data/labeled/negatives_v2.json
 
 What "hard-negative" means here:
   - The text contains at least one token that looks ticker-shaped or is a
@@ -36,14 +36,10 @@ import financedatabase as fd
 import pandas as pd
 from rich.console import Console
 from rich.table import Table
-
 from stock_recognizer.constants import AMBIGUOUS_WORDS, EXCHANGE_BLACKLIST
 from stock_recognizer.engine import StockRecognizer
 
-try:
-    from utils.cleaner import clean_reddit_markdown
-except ImportError:
-    from cleaner import clean_reddit_markdown
+from utils.labeling.cleaner import clean_reddit_markdown
 
 console = Console()
 
@@ -51,15 +47,52 @@ console = Console()
 # model is likely to over-fire on. Each seed match contributes more score
 # than a generic ambiguous-word match.
 SEED_FPS = {
-    "CNBC", "ER", "EUROPOORS", "STOCK",   # from v4 error_analysis output
-    "BUY", "SELL", "HOLD", "DUMP", "PUMP",
-    "YOLO", "DD", "FUD", "FOMO", "PUTS", "CALLS",
-    "JPOW", "POWELL", "FED", "SEC", "IRS",
-    "ATH", "ATL", "NFA", "IMO", "TLDR", "LMAO", "AMA",
-    "OP", "MOD", "USA", "UK", "CEO", "CFO", "IPO",
-    "BULL", "BEAR", "MOON", "GAINS", "LOSS", "EARNINGS",
+    "CNBC",
+    "ER",
+    "EUROPOORS",
+    "STOCK",  # from v4 error_analysis output
+    "BUY",
+    "SELL",
+    "HOLD",
+    "DUMP",
+    "PUMP",
+    "YOLO",
+    "DD",
+    "FUD",
+    "FOMO",
+    "PUTS",
+    "CALLS",
+    "JPOW",
+    "POWELL",
+    "FED",
+    "SEC",
+    "IRS",
+    "ATH",
+    "ATL",
+    "NFA",
+    "IMO",
+    "TLDR",
+    "LMAO",
+    "AMA",
+    "OP",
+    "MOD",
+    "USA",
+    "UK",
+    "CEO",
+    "CFO",
+    "IPO",
+    "BULL",
+    "BEAR",
+    "MOON",
+    "GAINS",
+    "LOSS",
+    "EARNINGS",
     # Financial bodies / media that produce FPs (v15 error analysis)
-    "FINRA", "DTC", "RSA", "CSRC", "BLOOMBERG",
+    "FINRA",
+    "DTC",
+    "RSA",
+    "CSRC",
+    "BLOOMBERG",
 }
 
 CASHTAG_RE = re.compile(r"\$[A-Za-z]{1,6}\b")
@@ -159,7 +192,9 @@ def load_sources(paths):
             continue
         for _, row in df.iterrows():
             body = str(row[text_col]) if pd.notna(row[text_col]) else ""
-            title = str(row[title_col]) if title_col and pd.notna(row[title_col]) else ""
+            title = (
+                str(row[title_col]) if title_col and pd.notna(row[title_col]) else ""
+            )
             combined = (title + "\n\n" + body).strip() if title else body
             yield path, combined
 
@@ -224,14 +259,16 @@ def mine(args):
         if score < args.min_score:
             continue
 
-        candidates.append({
-            "source": os.path.basename(source),
-            "text": cleaned,
-            "score": score,
-            "seeds": seeds,
-            "ticker_shaped": shaped,
-            "hash": h,
-        })
+        candidates.append(
+            {
+                "source": os.path.basename(source),
+                "text": cleaned,
+                "score": score,
+                "seeds": seeds,
+                "ticker_shaped": shaped,
+                "hash": h,
+            }
+        )
 
     console.print(
         f"\n[bold]Candidates: {len(candidates)}[/bold] "
@@ -239,7 +276,9 @@ def mine(args):
         f"too-short/empty: {skipped_empty}, no-ticker-shape: {skipped_no_shape})"
     )
     if not candidates:
-        console.print("[red]No candidates found — try lowering --min-score or adding sources.[/red]")
+        console.print(
+            "[red]No candidates found — try lowering --min-score or adding sources.[/red]"
+        )
         return
 
     # Pass 2: select top-N by score, then a diverse tail of random low-scorers.
@@ -294,7 +333,8 @@ def mine(args):
         preview.add_row(
             f"{c['score']:.1f}",
             ",".join(c["seeds"][:5]),
-            c["text"][:140].replace("\n", " ") + ("..." if len(c["text"]) > 140 else ""),
+            c["text"][:140].replace("\n", " ")
+            + ("..." if len(c["text"]) > 140 else ""),
         )
     console.print(preview)
 
@@ -306,40 +346,61 @@ def mine(args):
     # chunk as a negative supervision sample (via the `classifications` field).
     tasks = []
     for i, c in enumerate(selected):
-        tasks.append({
-            "id": ID_OFFSET + i,
-            "data": {"text": c["text"]},
-            "annotations": [{
-                "was_cancelled": False,
-                "result": [],
-            }],
-            "_mined_meta": {
-                "score": c["score"],
-                "seeds": c["seeds"],
-                "source": c["source"],
-            },
-        })
+        tasks.append(
+            {
+                "id": ID_OFFSET + i,
+                "data": {"text": c["text"]},
+                "annotations": [
+                    {
+                        "was_cancelled": False,
+                        "result": [],
+                    }
+                ],
+                "_mined_meta": {
+                    "score": c["score"],
+                    "seeds": c["seeds"],
+                    "source": c["source"],
+                },
+            }
+        )
 
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(tasks, f, indent=2, ensure_ascii=False)
-    console.print(f"[bold green]Wrote {len(tasks)} negatives to {args.output}[/bold green]")
+    console.print(
+        f"[bold green]Wrote {len(tasks)} negatives to {args.output}[/bold green]"
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sources", nargs="+", default=[
-        "data/wallstreetbets_posts.csv",
-        "data/wsb.csv",
-    ])
+    parser.add_argument(
+        "--sources",
+        nargs="+",
+        default=[
+            "data/wallstreetbets_posts.csv",
+            "data/wsb.csv",
+        ],
+    )
     parser.add_argument("--output", default="data/labeled/negatives_mined.json")
-    parser.add_argument("--n", type=int, default=300, help="How many negatives to emit.")
-    parser.add_argument("--min-score", type=float, default=1.0,
-                        help="Skip candidates below this hard-negative score.")
-    parser.add_argument("--diversity-frac", type=float, default=0.2,
-                        help="Fraction of selections drawn randomly from below-top-N.")
+    parser.add_argument(
+        "--n", type=int, default=300, help="How many negatives to emit."
+    )
+    parser.add_argument(
+        "--min-score",
+        type=float,
+        default=1.0,
+        help="Skip candidates below this hard-negative score.",
+    )
+    parser.add_argument(
+        "--diversity-frac",
+        type=float,
+        default=0.2,
+        help="Fraction of selections drawn randomly from below-top-N.",
+    )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print stats but don't write output.")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print stats but don't write output."
+    )
     args = parser.parse_args()
     mine(args)

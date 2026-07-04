@@ -36,11 +36,27 @@ scraper.py → CSV → cleaner.py → preds/ → Label Studio (manual review) �
 pytest
 
 # Benchmark all adapter versions under models/
-python trainer/benchmark.py
+python src/core/benchmark.py
+
+# Fix label-policy violations in annotated data
+python src/maintenance/fix_label_policy.py          # preview changes
+python src/maintenance/fix_label_policy.py --apply  # apply fixes
 
 # Publish a trained adapter to the Hugging Face Hub
-python utils/push_model_to_hf.py models/reddit_adapter_v18/final --version v18
+python utils/hf/push_model_to_hf.py models/reddit_adapter_v18/final --version v18
 ```
+
+## Trainer organization
+
+The src code is organized by responsibility rather than as a single flat
+list of scripts. See [src/README.md](src/README.md) for the current
+layout guide.
+
+## Utils organization
+
+The helper scripts are grouped under [utils/README.md](utils/README.md) by
+task: labeling, scraping, augmentation, synthetic labeling, and Hugging Face
+publishing.
 
 ## Label Guidelines 🏷️
 
@@ -83,13 +99,6 @@ gme   amc   tsla   spy
 | Financial metric acronyms | `PDT`, `EV` (enterprise value), `SG&A`, `RSUs`, `PT` (price target), `ATM`, `IV` |
 | Memory / chip technology terms | `DRAM`, `HBM`, `EUV`, `NAND` (without `$` prefix) |
 | Media outlets with no public stock | `CNBC`, `Bloomberg`, `HBO`, `MSNBC` |
-
-### Keeping data consistent
-
-```bash
-python trainer/fix_label_policy.py          # preview changes
-python trainer/fix_label_policy.py --apply  # apply fixes
-```
 
 After fixing `data/labeled/`, regenerate `data/augmented/` before retraining.
 

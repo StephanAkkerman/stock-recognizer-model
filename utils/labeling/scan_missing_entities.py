@@ -14,9 +14,9 @@ These rules are narrow enough to produce zero false positives in practice,
 so the output can be auto-fixed with --fix without manual review.
 
 Usage:
-    python utils/scan_missing_entities.py          # dry-run report
-    python utils/scan_missing_entities.py --fix    # patch preds files
-    python utils/scan_missing_entities.py --fix --fix-reviewed  # patch all
+    python utils/labeling/scan_missing_entities.py          # dry-run report
+    python utils/labeling/scan_missing_entities.py --fix    # patch preds files
+    python utils/labeling/scan_missing_entities.py --fix --fix-reviewed  # patch all
 """
 
 import argparse

@@ -33,8 +33,9 @@ def clean_reddit_markdown(text: str) -> str:
 
 
 if __name__ == "__main__":
-    from dataset_builder import DatasetBuilder, get_latest_adapter_path
     from stock_recognizer.engine import StockRecognizer
+
+    from src.core.dataset_builder import DatasetBuilder, get_latest_adapter_path
 
     # 1. Load the Auto-discovering Engine
     latest_adapter = get_latest_adapter_path("./models")

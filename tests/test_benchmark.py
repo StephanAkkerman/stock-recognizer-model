@@ -1,13 +1,13 @@
-"""Tests for trainer/benchmark.py engine evaluation path."""
+"""Tests for src/core/benchmark.py engine evaluation path."""
 
 from unittest.mock import MagicMock
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers to build a minimal fake StockRecognizer
 # ---------------------------------------------------------------------------
+
 
 def _make_fake_engine(recognize_ai_results):
     """Return a mock StockRecognizer whose recognize_ai() returns the given
@@ -28,9 +28,10 @@ def _make_fake_engine(recognize_ai_results):
 # Unit tests for _resolve_gold_tickers
 # ---------------------------------------------------------------------------
 
+
 def test_resolve_gold_tickers_direct_ticker():
     """A gold span that is itself a valid ticker resolves directly."""
-    from trainer.benchmark import _resolve_gold_tickers
+    from src.core.benchmark import _resolve_gold_tickers
 
     engine = _make_fake_engine([])
     entry = {
@@ -43,7 +44,7 @@ def test_resolve_gold_tickers_direct_ticker():
 
 def test_resolve_gold_tickers_company_resolution():
     """A gold span that is a company name resolves through company_to_ticker."""
-    from trainer.benchmark import _resolve_gold_tickers
+    from src.core.benchmark import _resolve_gold_tickers
 
     engine = _make_fake_engine([])
     entry = {
@@ -56,7 +57,7 @@ def test_resolve_gold_tickers_company_resolution():
 
 def test_resolve_gold_tickers_unresolvable_span():
     """A span that cannot be resolved to any ticker is silently dropped."""
-    from trainer.benchmark import _resolve_gold_tickers
+    from src.core.benchmark import _resolve_gold_tickers
 
     engine = _make_fake_engine([])
     engine.valid_tickers = set()
@@ -89,12 +90,11 @@ TINY_DATASET = [
 
 def test_engine_evaluate_model_tp_fp_fn():
     """engine_evaluate_model computes TP/FP/FN correctly across 2 documents."""
-    from trainer.benchmark import engine_evaluate_model
     import stock_recognizer.engine as _eng_mod
 
-    fake_engine = _make_fake_engine(
-        recognize_ai_results=[["AAPL"], ["TSLA", "MSFT"]]
-    )
+    from src.core.benchmark import engine_evaluate_model
+
+    fake_engine = _make_fake_engine(recognize_ai_results=[["AAPL"], ["TSLA", "MSFT"]])
 
     original = _eng_mod.StockRecognizer
     _eng_mod.StockRecognizer = lambda **kw: fake_engine
@@ -114,8 +114,9 @@ def test_engine_evaluate_model_tp_fp_fn():
 
 def test_engine_evaluate_model_returns_overall_key():
     """engine_evaluate_model always returns a dict with an 'overall' key."""
-    from trainer.benchmark import engine_evaluate_model
     import stock_recognizer.engine as _eng_mod
+
+    from src.core.benchmark import engine_evaluate_model
 
     fake_engine = _make_fake_engine(recognize_ai_results=[[], []])
 
@@ -135,8 +136,9 @@ def test_engine_evaluate_model_returns_overall_key():
 # contract: recognize() returns a *set* of tickers, not per-occurrence spans).
 # ---------------------------------------------------------------------------
 
+
 def test_normalize_entity_folds_cashtag_case_and_whitespace():
-    from trainer.benchmark import normalize_entity
+    from src.core.benchmark import normalize_entity
 
     assert normalize_entity("$GME") == "GME"
     assert normalize_entity("gme") == "GME"
@@ -147,7 +149,7 @@ def test_normalize_entity_folds_cashtag_case_and_whitespace():
 
 def test_prepare_eval_inputs_dedups_repeated_mentions():
     """A ticker mentioned many times in one doc collapses to a single gold key."""
-    from trainer.benchmark import prepare_eval_inputs
+    from src.core.benchmark import prepare_eval_inputs
 
     dataset = [
         {
@@ -159,7 +161,9 @@ def test_prepare_eval_inputs_dedups_repeated_mentions():
             ],
         }
     ]
-    _, _, gold_per_doc, gold_by_label = prepare_eval_inputs(dataset, ["ticker", "company"])
+    _, _, gold_per_doc, gold_by_label = prepare_eval_inputs(
+        dataset, ["ticker", "company"]
+    )
 
     assert gold_per_doc[0] == {("GME", "ticker")}
     assert gold_by_label[0]["ticker"] == {("GME", "ticker")}
@@ -184,7 +188,7 @@ class _FakeGmeModel:
 
 def test_evaluate_model_dedups_repeated_mentions_to_one_tp():
     """Catching GME many times in a doc counts as a single TP, no FP/FN."""
-    from trainer.benchmark import evaluate_model, prepare_eval_inputs
+    from src.core.benchmark import evaluate_model, prepare_eval_inputs
 
     dataset = [
         {

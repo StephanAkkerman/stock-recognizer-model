@@ -1,7 +1,7 @@
 """Sweep the decision threshold across all adapters on the held-out test set.
 
 Run:
-    python trainer/threshold_sweep.py
+    python src/analysis/threshold_sweep.py
 
 Prints one Rich table per adapter showing precision / recall / F1 at each
 threshold, with the F1-optimal row marked. Intended for picking the operating
@@ -27,26 +27,15 @@ from rich.progress import (
 )
 from rich.table import Table
 
-try:
-    from trainer.benchmark import (
-        DEFAULT_LABELS,
-        DEFAULT_TEST_FOLDER,
-        evaluate_model,
-        get_all_adapters,
-        load_base_model,
-        parse_all_label_studio_exports,
-        prepare_eval_inputs,
-    )
-except ImportError:
-    from benchmark import (
-        DEFAULT_LABELS,
-        DEFAULT_TEST_FOLDER,
-        evaluate_model,
-        get_all_adapters,
-        load_base_model,
-        parse_all_label_studio_exports,
-        prepare_eval_inputs,
-    )
+from src.core.benchmark import (
+    DEFAULT_LABELS,
+    DEFAULT_TEST_FOLDER,
+    evaluate_model,
+    get_all_adapters,
+    load_base_model,
+    parse_all_label_studio_exports,
+    prepare_eval_inputs,
+)
 
 console = Console()
 

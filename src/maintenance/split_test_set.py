@@ -19,10 +19,10 @@ in the score. A stratified sample fixes both: distribution-matched test, and
 the entity-volume balance reflects production usage.
 
 Run:
-    python trainer/split_test_set.py            # writes test/, prints summary
-    python trainer/split_test_set.py --seed 7   # different deterministic split
+    python src/maintenance/split_test_set.py            # writes test/, prints summary
+    python src/maintenance/split_test_set.py --seed 7   # different deterministic split
 
-After running, re-benchmark every adapter (`python trainer/benchmark.py`)
+After running, re-benchmark every adapter (`python src/core/benchmark.py`)
 because the new test set has a different hash — old cached results don't
 apply.
 """
@@ -240,7 +240,7 @@ def main():
         raise SystemExit(1)
 
     console.print(
-        "\n[green]Next:[/green] run `python trainer/benchmark.py` to rescore all "
+        "\n[green]Next:[/green] run `python src/core/benchmark.py` to rescore all "
         "adapters against the new test set."
     )
 

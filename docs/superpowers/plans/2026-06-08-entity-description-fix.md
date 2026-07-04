@@ -14,9 +14,9 @@
 
 | File | Change |
 |------|--------|
-| `trainer/train.py` | Replace `ENTITY_DESCRIPTIONS` |
-| `trainer/benchmark.py` | Replace `DEFAULT_LABELS`; add `--engine` flag + `engine_evaluate_model()` |
-| `utils/auto_label.py` | Update `SYSTEM_INSTRUCTIONS`; extend `FEW_SHOT_EXAMPLES` |
+| `src/core/train.py` | Replace `ENTITY_DESCRIPTIONS` |
+| `src/core/benchmark.py` | Replace `DEFAULT_LABELS`; add `--engine` flag + `engine_evaluate_model()` |
+| `utils/synthetic/auto_label.py` | Update `SYSTEM_INSTRUCTIONS`; extend `FEW_SHOT_EXAMPLES` |
 | `stock_recognizer/engine.py` | Update `self.ai_labels`; fix `recognize_ai()` to pass descriptions; add relabeling guard |
 | `tests/test_engine.py` | Add test verifying descriptions are passed at inference |
 | `tests/test_auto_label.py` | Add tests verifying new few-shot examples appear in prompts |
@@ -26,11 +26,11 @@
 ### Task 1: Update `ENTITY_DESCRIPTIONS` in train.py
 
 **Files:**
-- Modify: `trainer/train.py:23-26`
+- Modify: `src/core/train.py:23-26`
 
 - [ ] **Step 1: Replace `ENTITY_DESCRIPTIONS`**
 
-  Open `trainer/train.py` and replace lines 23–26 with:
+  Open `src/core/train.py` and replace lines 23–26 with:
 
   ```python
   ENTITY_DESCRIPTIONS = {
@@ -62,7 +62,7 @@
 - [ ] **Step 3: Commit**
 
   ```bash
-  git add trainer/train.py
+  git add src/core/train.py
   git commit -m "fix: sharpen ENTITY_DESCRIPTIONS — all-caps abbreviations are always tickers"
   ```
 
@@ -71,13 +71,13 @@
 ### Task 2: Sync `DEFAULT_LABELS` in benchmark.py
 
 **Files:**
-- Modify: `trainer/benchmark.py:41-44`
+- Modify: `src/core/benchmark.py:41-44`
 
 `DEFAULT_LABELS` is passed as label descriptions to `batch_extract_entities()` at evaluation time. It must match `ENTITY_DESCRIPTIONS` exactly so the model sees the same prompt it was trained on.
 
 - [ ] **Step 1: Replace `DEFAULT_LABELS`**
 
-  Open `trainer/benchmark.py` and replace lines 41–44 with:
+  Open `src/core/benchmark.py` and replace lines 41–44 with:
 
   ```python
   DEFAULT_LABELS = {
@@ -109,7 +109,7 @@
 - [ ] **Step 3: Commit**
 
   ```bash
-  git add trainer/benchmark.py
+  git add src/core/benchmark.py
   git commit -m "fix: sync DEFAULT_LABELS with updated ENTITY_DESCRIPTIONS"
   ```
 
@@ -118,8 +118,8 @@
 ### Task 3: Update `SYSTEM_INSTRUCTIONS` and `FEW_SHOT_EXAMPLES` in auto_label.py
 
 **Files:**
-- Modify: `utils/auto_label.py:123-158` (SYSTEM_INSTRUCTIONS)
-- Modify: `utils/auto_label.py:64-105` (FEW_SHOT_EXAMPLES)
+- Modify: `utils/synthetic/auto_label.py:123-158` (SYSTEM_INSTRUCTIONS)
+- Modify: `utils/synthetic/auto_label.py:64-105` (FEW_SHOT_EXAMPLES)
 - Test: `tests/test_auto_label.py`
 
 - [ ] **Step 1: Write two failing tests**
@@ -149,7 +149,7 @@
 
 - [ ] **Step 3: Replace the DEFINITIONS block in `SYSTEM_INSTRUCTIONS`**
 
-  In `utils/auto_label.py`, find the `DEFINITIONS:` section (lines ~128–136) inside `SYSTEM_INSTRUCTIONS` and replace the two bullet points with:
+  In `utils/synthetic/auto_label.py`, find the `DEFINITIONS:` section (lines ~128–136) inside `SYSTEM_INSTRUCTIONS` and replace the two bullet points with:
 
   ```
       DEFINITIONS:
@@ -201,7 +201,7 @@
 - [ ] **Step 7: Commit**
 
   ```bash
-  git add utils/auto_label.py tests/test_auto_label.py
+  git add utils/synthetic/auto_label.py tests/test_auto_label.py
   git commit -m "fix: update auto_label descriptions and add GME/upstart few-shot examples"
   ```
 
@@ -327,7 +327,7 @@
 - [ ] **Step 1: Run training**
 
   ```bash
-  python trainer/train.py
+  python src/core/train.py
   ```
 
   Expected: prints train/val sample counts, runs training with early stopping (typically stops at epoch 7–9 of 10), then automatically benchmarks on the test set and writes to `models/benchmark_results.json`. Wait ~30–60 min on GPU.
@@ -339,7 +339,7 @@
   If the new adapter's F1 is lower than v4, run the full benchmark to compare all versions:
 
   ```bash
-  python trainer/benchmark.py
+  python src/core/benchmark.py
   ```
 
 - [ ] **Step 3: Commit the training metadata**
@@ -364,7 +364,7 @@
 This adds a second evaluation path that routes inference through `StockRecognizer.recognize_ai()`, measuring production F1 (regex cashtag pre-pass + model + relabeling guard + company name resolution) rather than raw span-level NER F1.
 
 **Files:**
-- Modify: `trainer/benchmark.py`
+- Modify: `src/core/benchmark.py`
 
 - [ ] **Step 1: Add `engine_evaluate_model()` after `evaluate_model()`**
 
@@ -448,7 +448,7 @@ This adds a second evaluation path that routes inference through `StockRecognize
 - [ ] **Step 3: Run to verify**
 
   ```bash
-  python trainer/benchmark.py --engine
+  python src/core/benchmark.py --engine
   ```
 
   Expected: normal benchmark table prints first, then the engine-mode section appears for each adapter with a production F1 that includes the regex and resolution effects.
@@ -456,6 +456,6 @@ This adds a second evaluation path that routes inference through `StockRecognize
 - [ ] **Step 4: Commit**
 
   ```bash
-  git add trainer/benchmark.py
+  git add src/core/benchmark.py
   git commit -m "feat: add --engine flag to benchmark for production F1 via StockRecognizer"
   ```

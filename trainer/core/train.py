@@ -276,11 +276,14 @@ def gather_training_metadata(
 
     # Pull augmentation knobs at training time. These are module-level
     # constants in utils.augment_data; if the user mutated them between
-    # `python utils/augment_data.py` and `python trainer/train.py`, the
+    # `python utils/augment_data.py` and `python trainer/core/train.py`, the
     # captured values reflect the latter — best-effort, not authoritative.
     aug = {}
     try:
-        from utils.augment_data import CASHTAG_FORMAT_PROB, EXPANDED_POOL_WEIGHT
+        from utils.augmentation.augment_data import (
+            CASHTAG_FORMAT_PROB,
+            EXPANDED_POOL_WEIGHT,
+        )
 
         aug["expanded_pool_weight"] = EXPANDED_POOL_WEIGHT
         aug["cashtag_format_prob"] = CASHTAG_FORMAT_PROB
@@ -336,10 +339,7 @@ if __name__ == "__main__":
     # newly added labeled_*.json gets its ~15% stratified slice held out
     # automatically. Deterministic via the same SEED, so the split is
     # reproducible across runs as long as the source files don't change.
-    try:
-        from trainer.split_test_set import run as refresh_test_split
-    except ImportError:
-        from split_test_set import run as refresh_test_split
+    from trainer.maintenance.split_test_set import run as refresh_test_split
 
     console.print("[bold cyan]Refreshing stratified test split...[/bold cyan]")
     refresh_test_split(seed=SEED)
@@ -423,11 +423,8 @@ if __name__ == "__main__":
     console.print(f"[cyan]Wrote training metadata to {metadata_path}[/cyan]")
 
     # Benchmark the freshly trained adapter and persist the result so the
-    # next ``python trainer/benchmark.py`` run can short-circuit this version.
-    try:
-        from trainer.benchmark import benchmark_adapter, locate_adapter_weights
-    except ImportError:
-        from benchmark import benchmark_adapter, locate_adapter_weights
+    # next ``python trainer/core/benchmark.py`` run can short-circuit this version.
+    from trainer.core.benchmark import benchmark_adapter, locate_adapter_weights
 
     adapter_final = locate_adapter_weights(output_dir)
     if adapter_final is None:

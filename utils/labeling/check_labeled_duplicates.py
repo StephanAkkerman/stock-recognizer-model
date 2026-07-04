@@ -1,9 +1,9 @@
 """Check for duplicate labeled tasks by text in Label Studio exports.
 
 Usage examples:
-  python utils/check_labeled_duplicates.py            # scans data/labeled/
-  python utils/check_labeled_duplicates.py --files data/labeled/new_batch.json
-  python utils/check_labeled_duplicates.py --dir data/labeled --report dup.csv
+    python utils/labeling/check_labeled_duplicates.py            # scans data/labeled/
+    python utils/labeling/check_labeled_duplicates.py --files data/labeled/new_batch.json
+    python utils/labeling/check_labeled_duplicates.py --dir data/labeled --report dup.csv
 
 The script normalizes whitespace when comparing texts. If you pass --files,
 the script will highlight duplicates between those files and the rest of the

@@ -1,11 +1,11 @@
 """Break down where a trained adapter actually fails on the held-out test set.
 
 Run:
-    python trainer/error_analysis.py                       # latest adapter
-    python trainer/error_analysis.py --adapter v4
-    python trainer/error_analysis.py --adapter base
-    python trainer/error_analysis.py --threshold 0.5 --top 30
-    python trainer/error_analysis.py --save-json out.json  # full dump
+    python src/analysis/error_analysis.py                       # latest adapter
+    python src/analysis/error_analysis.py --adapter v4
+    python src/analysis/error_analysis.py --adapter base
+    python src/analysis/error_analysis.py --threshold 0.5 --top 30
+    python src/analysis/error_analysis.py --save-json out.json  # full dump
 
 Scoring is **set-based and deduplicated per document** — the same contract the
 engine exposes (``recognize`` returns a *set* of tickers, so an entity is
@@ -37,28 +37,16 @@ import torch
 from rich.console import Console
 from rich.table import Table
 
-try:
-    from trainer.benchmark import (
-        DEFAULT_LABELS,
-        DEFAULT_TEST_FOLDER,
-        _resolve_gold_tickers,
-        get_all_adapters,
-        load_base_model,
-        normalize_entity,
-        parse_all_label_studio_exports,
-        prepare_eval_inputs,
-    )
-except ImportError:
-    from benchmark import (
-        DEFAULT_LABELS,
-        DEFAULT_TEST_FOLDER,
-        _resolve_gold_tickers,
-        get_all_adapters,
-        load_base_model,
-        normalize_entity,
-        parse_all_label_studio_exports,
-        prepare_eval_inputs,
-    )
+from src.core.benchmark import (
+    DEFAULT_LABELS,
+    DEFAULT_TEST_FOLDER,
+    _resolve_gold_tickers,
+    get_all_adapters,
+    load_base_model,
+    normalize_entity,
+    parse_all_label_studio_exports,
+    prepare_eval_inputs,
+)
 
 console = Console()
 
@@ -81,7 +69,9 @@ def resolve_adapter(spec):
     for a in adapters:
         if a["version"] == target:
             return (a["name"], a["path"])
-    raise SystemExit(f"Adapter v{target} not found. Available: {[a['version'] for a in adapters]}")
+    raise SystemExit(
+        f"Adapter v{target} not found. Available: {[a['version'] for a in adapters]}"
+    )
 
 
 def run_inference(model, flat_chunks, label_descriptions, threshold, batch_size=32):
@@ -153,7 +143,10 @@ def collect_pred_contexts(all_outputs, flat_chunks, doc_chunk_ranges, context_ch
                 key = (normalize_entity(surface), label)
                 ctx.setdefault(
                     key,
-                    {"surface": surface, "context": _make_context(chunk_text, s, e, context_chars)},
+                    {
+                        "surface": surface,
+                        "context": _make_context(chunk_text, s, e, context_chars),
+                    },
                 )
         out.append(ctx)
     return out
@@ -166,11 +159,14 @@ def collect_gold_contexts(dataset, context_chars=40):
         text = entry["text"]
         ctx = {}
         for e in entry["entities"]:
-            surface = text[e["start"]:e["end"]]
+            surface = text[e["start"] : e["end"]]
             key = (normalize_entity(surface), e["label"])
             ctx.setdefault(
                 key,
-                {"surface": surface, "context": _make_context(text, e["start"], e["end"], context_chars)},
+                {
+                    "surface": surface,
+                    "context": _make_context(text, e["start"], e["end"], context_chars),
+                },
             )
         out.append(ctx)
     return out
@@ -217,40 +213,50 @@ def categorize_errors(pred_ctx_per_doc, gold_ctx_per_doc, dataset):
                 for gold_label in fn_labels[norm]:
                     if pred_label == gold_label:
                         continue
-                    src = gold_ctx.get((norm, gold_label)) or pred_ctx.get((norm, pred_label))
-                    confusion.append({
-                        "doc_idx": doc_idx,
-                        "text": src["surface"],
-                        "gold_label": gold_label,
-                        "pred_label": pred_label,
-                        "context": src["context"],
-                    })
+                    src = gold_ctx.get((norm, gold_label)) or pred_ctx.get(
+                        (norm, pred_label)
+                    )
+                    confusion.append(
+                        {
+                            "doc_idx": doc_idx,
+                            "text": src["surface"],
+                            "gold_label": gold_label,
+                            "pred_label": pred_label,
+                            "context": src["context"],
+                        }
+                    )
                     consumed_fp.add((norm, pred_label))
                     consumed_fn.add((norm, gold_label))
 
         # 2 & 3. Everything unconsumed is a pure FP / FN.
         for key in fps - consumed_fp:
-            pure_fp.append({
-                "doc_idx": doc_idx,
-                "text": pred_ctx[key]["surface"],
-                "label": key[1],
-                "context": pred_ctx[key]["context"],
-            })
+            pure_fp.append(
+                {
+                    "doc_idx": doc_idx,
+                    "text": pred_ctx[key]["surface"],
+                    "label": key[1],
+                    "context": pred_ctx[key]["context"],
+                }
+            )
         for key in fns - consumed_fn:
-            pure_fn.append({
-                "doc_idx": doc_idx,
-                "text": gold_ctx[key]["surface"],
-                "label": key[1],
-                "context": gold_ctx[key]["context"],
-            })
+            pure_fn.append(
+                {
+                    "doc_idx": doc_idx,
+                    "text": gold_ctx[key]["surface"],
+                    "label": key[1],
+                    "context": gold_ctx[key]["context"],
+                }
+            )
 
-        per_doc_counts.append({
-            "doc_idx": doc_idx,
-            "n_errors": len(fps) + len(fns),
-            "n_fp": len(fps),
-            "n_fn": len(fns),
-            "preview": dataset[doc_idx]["text"][:80].replace("\n", " "),
-        })
+        per_doc_counts.append(
+            {
+                "doc_idx": doc_idx,
+                "n_errors": len(fps) + len(fns),
+                "n_fp": len(fps),
+                "n_fn": len(fns),
+                "preview": dataset[doc_idx]["text"][:80].replace("\n", " "),
+            }
+        )
 
     return {
         "pure_fp": pure_fp,
@@ -298,7 +304,9 @@ def render_fp_fn_table(title, agg, label_col):
 
 
 def render_confusion_table(agg):
-    table = Table(title="Label confusions (same surface, different label)", show_lines=False)
+    table = Table(
+        title="Label confusions (same surface, different label)", show_lines=False
+    )
     table.add_column("#", justify="right", style="dim", width=4)
     table.add_column("text", style="bold")
     table.add_column("gold→pred")
@@ -312,6 +320,7 @@ def render_confusion_table(agg):
 def _find_ticker_context(text, ticker, context_chars):
     """Return a context snippet around the first occurrence of ticker in text."""
     import re
+
     m = re.search(rf"\$?{re.escape(ticker)}\b", text, re.IGNORECASE)
     if m:
         return _make_context(text, m.start(), m.end(), context_chars)
@@ -347,26 +356,32 @@ def engine_categorize_errors(dataset, adapter_path, context_chars=40):
         total_fn += len(fns)
 
         for ticker in sorted(fps):
-            fp_records.append({
-                "doc_idx": doc_idx,
-                "text": ticker,
-                "label": "ticker",
-                "context": _find_ticker_context(text, ticker, context_chars),
-            })
+            fp_records.append(
+                {
+                    "doc_idx": doc_idx,
+                    "text": ticker,
+                    "label": "ticker",
+                    "context": _find_ticker_context(text, ticker, context_chars),
+                }
+            )
         for ticker in sorted(fns):
-            fn_records.append({
+            fn_records.append(
+                {
+                    "doc_idx": doc_idx,
+                    "text": ticker,
+                    "label": "ticker",
+                    "context": _find_ticker_context(text, ticker, context_chars),
+                }
+            )
+        per_doc.append(
+            {
                 "doc_idx": doc_idx,
-                "text": ticker,
-                "label": "ticker",
-                "context": _find_ticker_context(text, ticker, context_chars),
-            })
-        per_doc.append({
-            "doc_idx": doc_idx,
-            "n_errors": len(fps) + len(fns),
-            "n_fp": len(fps),
-            "n_fn": len(fns),
-            "preview": text[:80].replace("\n", " "),
-        })
+                "n_errors": len(fps) + len(fns),
+                "n_fp": len(fps),
+                "n_fn": len(fns),
+                "preview": text[:80].replace("\n", " "),
+            }
+        )
 
     p = total_tp / (total_tp + total_fp) if (total_tp + total_fp) else 0.0
     r = total_tp / (total_tp + total_fn) if (total_tp + total_fn) else 0.0
@@ -399,22 +414,46 @@ def render_doc_hotspots(per_doc, top):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--adapter", default="latest",
-                        help="'latest' (default), 'base', or a version like 'v4' / '4'.")
-    parser.add_argument("--threshold", type=float, default=0.75,
-                        help="Confidence threshold (default 0.75, matches benchmark).")
-    parser.add_argument("--top", type=int, default=50,
-                        help="Max rows per error table (default 50; use 0 to show all).")
-    parser.add_argument("--context", type=int, default=40,
-                        help="Chars of context on each side of an error (default 40).")
-    parser.add_argument("--test-folder", default=DEFAULT_TEST_FOLDER,
-                        help=f"Held-out test set folder (default {DEFAULT_TEST_FOLDER}).")
-    parser.add_argument("--save-json", default=None,
-                        help="Optional path to dump the full categorised error data as JSON.")
-    parser.add_argument("--engine", action="store_true",
-                        help="Analyse the full StockRecognizer.recognize_ai() pipeline "
-                             "instead of the raw NER model. FPs/FNs are at the resolved-ticker "
-                             "level. No GPU load — uses cached engine.")
+    parser.add_argument(
+        "--adapter",
+        default="latest",
+        help="'latest' (default), 'base', or a version like 'v4' / '4'.",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.75,
+        help="Confidence threshold (default 0.75, matches benchmark).",
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=50,
+        help="Max rows per error table (default 50; use 0 to show all).",
+    )
+    parser.add_argument(
+        "--context",
+        type=int,
+        default=40,
+        help="Chars of context on each side of an error (default 40).",
+    )
+    parser.add_argument(
+        "--test-folder",
+        default=DEFAULT_TEST_FOLDER,
+        help=f"Held-out test set folder (default {DEFAULT_TEST_FOLDER}).",
+    )
+    parser.add_argument(
+        "--save-json",
+        default=None,
+        help="Optional path to dump the full categorised error data as JSON.",
+    )
+    parser.add_argument(
+        "--engine",
+        action="store_true",
+        help="Analyse the full StockRecognizer.recognize_ai() pipeline "
+        "instead of the raw NER model. FPs/FNs are at the resolved-ticker "
+        "level. No GPU load — uses cached engine.",
+    )
     args = parser.parse_args()
 
     adapter_name, adapter_path = resolve_adapter(args.adapter)
@@ -441,19 +480,32 @@ def main():
         )
         if fp_records:
             agg = _aggregate(fp_records, ("text", "label"), args.top)
-            console.print(render_fp_fn_table(
-                f"Top {top_label} engine false positives", agg, "label"))
+            console.print(
+                render_fp_fn_table(
+                    f"Top {top_label} engine false positives", agg, "label"
+                )
+            )
         if fn_records:
             agg = _aggregate(fn_records, ("text", "label"), args.top)
-            console.print(render_fp_fn_table(
-                f"Top {top_label} engine false negatives", agg, "label"))
+            console.print(
+                render_fp_fn_table(
+                    f"Top {top_label} engine false negatives", agg, "label"
+                )
+            )
         console.print(render_doc_hotspots(per_doc, args.top))
         if args.save_json:
             with open(args.save_json, "w", encoding="utf-8") as f:
                 json.dump(
-                    {"adapter": adapter_name, "mode": "engine",
-                     "summary": summary, "fp": fp_records, "fn": fn_records},
-                    f, indent=2, ensure_ascii=False,
+                    {
+                        "adapter": adapter_name,
+                        "mode": "engine",
+                        "summary": summary,
+                        "fp": fp_records,
+                        "fn": fn_records,
+                    },
+                    f,
+                    indent=2,
+                    ensure_ascii=False,
                 )
             console.print(f"[green]Written to {args.save_json}[/green]")
         return
@@ -482,10 +534,7 @@ def main():
         all_outputs, flat_chunks, doc_chunk_ranges, args.context
     )
     total_pred = sum(len(p) for p in pred_ctx_per_doc)
-    n_tp = sum(
-        len(set(p) & set(g))
-        for p, g in zip(pred_ctx_per_doc, gold_ctx_per_doc)
-    )
+    n_tp = sum(len(set(p) & set(g)) for p, g in zip(pred_ctx_per_doc, gold_ctx_per_doc))
 
     categories = categorize_errors(pred_ctx_per_doc, gold_ctx_per_doc, dataset)
     n_fp = total_pred - n_tp
@@ -507,14 +556,22 @@ def main():
 
     if categories["pure_fp"]:
         agg = _aggregate(categories["pure_fp"], ("text", "label"), args.top)
-        console.print(render_fp_fn_table(
-            f"Top {top_label} false positives (hallucinated entities)", agg, "label"))
+        console.print(
+            render_fp_fn_table(
+                f"Top {top_label} false positives (hallucinated entities)", agg, "label"
+            )
+        )
     if categories["pure_fn"]:
         agg = _aggregate(categories["pure_fn"], ("text", "label"), args.top)
-        console.print(render_fp_fn_table(
-            f"Top {top_label} false negatives (missed entities)", agg, "label"))
+        console.print(
+            render_fp_fn_table(
+                f"Top {top_label} false negatives (missed entities)", agg, "label"
+            )
+        )
     if categories["confusion"]:
-        agg = _aggregate(categories["confusion"], ("text", "gold_label", "pred_label"), args.top)
+        agg = _aggregate(
+            categories["confusion"], ("text", "gold_label", "pred_label"), args.top
+        )
         console.print(render_confusion_table(agg))
 
     console.print(render_doc_hotspots(categories["per_doc"], args.top))
@@ -526,7 +583,14 @@ def main():
                     "adapter": adapter_name,
                     "threshold": args.threshold,
                     "test_folder": args.test_folder,
-                    "summary": {"tp": n_tp, "fp": n_fp, "fn": n_fn, "p": p, "r": r, "f1": f1},
+                    "summary": {
+                        "tp": n_tp,
+                        "fp": n_fp,
+                        "fn": n_fn,
+                        "p": p,
+                        "r": r,
+                        "f1": f1,
+                    },
                     "categories": categories,
                 },
                 f,

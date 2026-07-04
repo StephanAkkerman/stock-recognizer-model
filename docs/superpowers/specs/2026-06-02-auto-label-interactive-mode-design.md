@@ -1,11 +1,11 @@
 # Auto-label interactive mode — design
 
 **Date:** 2026-06-02
-**File touched:** `utils/auto_label.py`
+**File touched:** `utils/synthetic/auto_label.py`
 
 ## Problem
 
-`utils/auto_label.py` currently labels Reddit posts in a two-command cycle per
+`utils/synthetic/auto_label.py` currently labels Reddit posts in a two-command cycle per
 batch: `--print-prompt` to emit a prompt, paste it into an LLM by hand, save the
 reply to a file, then `--response-file` to parse and save. Doing many batches
 means repeatedly re-running the script and juggling temp files.
