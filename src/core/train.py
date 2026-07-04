@@ -406,6 +406,16 @@ if __name__ == "__main__":
         f"[bold green]v{next_version} Adapter trained and saved to {output_dir}/final/[/bold green]"
     )
 
+    # Fix task_type in adapter_config.json for HuggingFace Hub compliance
+    adapter_config_path = os.path.join(output_dir, "final", "adapter_config.json")
+    if os.path.exists(adapter_config_path):
+        with open(adapter_config_path, "r", encoding="utf-8") as f:
+            adapter_config = json.load(f)
+        adapter_config["task_type"] = "TOKEN_CLS"
+        with open(adapter_config_path, "w", encoding="utf-8") as f:
+            json.dump(adapter_config, f, indent=2)
+        console.print("[cyan]Set task_type to TOKEN_CLS in adapter_config.json[/cyan]")
+
     # Snapshot the full training context next to the adapter so re-benchmark
     # runs months later still know which data + config produced this version.
     metadata = gather_training_metadata(

@@ -1,5 +1,4 @@
-stock-recognizer @ file:../stock-recognizer
-
+# stock-recognizer @ file:../stock-recognizer
 financedatabase>=2.2.0
 pandas
 numpy

@@ -2,9 +2,6 @@
 
 Training pipeline and labeled data for the GLiNER2 adapter behind [`stock-recognizer`](https://github.com/StephanAkkerman/stock-recognizer)'s `recognize_ai()` — scraping, cleaning, labeling, augmentation, training, benchmarking, and publishing to the Hugging Face Hub.
 
-> [!WARNING]
-> This project is still in its alpha stage. Expect breaking changes as the labeling policy and training pipeline evolve.
-
 ## Relationship to `stock-recognizer`
 
 - The trained adapter is used **by** the engine repo at inference time.
@@ -13,6 +10,12 @@ Training pipeline and labeled data for the GLiNER2 adapter behind [`stock-recogn
 ```bash
 pip install -e ../stock-recognizer
 pip install -r requirements.txt
+```
+
+Install torch with CUDA separately if you want to train on GPU:
+
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
 ```
 
 - Trained adapters are published to [`StephanAkkerman/stock-recognizer-model`](https://huggingface.co/StephanAkkerman/stock-recognizer-model) on the Hugging Face Hub, tagged per version — not committed to git.
@@ -48,14 +51,12 @@ python utils/hf/push_model_to_hf.py models/reddit_adapter_v18/final --version v1
 
 ## Trainer organization
 
-The src code is organized by responsibility rather than as a single flat
-list of scripts. See [src/README.md](src/README.md) for the current
+The src code is organized by responsibility rather than as a single flat list of scripts. See [src/README.md](src/README.md) for the current
 layout guide.
 
 ## Utils organization
 
-The helper scripts are grouped under [utils/README.md](utils/README.md) by
-task: labeling, scraping, augmentation, synthetic labeling, and Hugging Face
+The helper scripts are grouped under [utils/README.md](utils/README.md) by task: labeling, scraping, augmentation, synthetic labeling, and Hugging Face
 publishing.
 
 ## Label Guidelines 🏷️
