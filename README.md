@@ -20,6 +20,8 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 - Trained adapters are published to [`StephanAkkerman/stock-recognizer-model`](https://huggingface.co/StephanAkkerman/stock-recognizer-model) on the Hugging Face Hub, tagged per version — not committed to git.
 
+- Dataset exports are also pushed to the Hugging Face Hub to [`StephanAkkerman/wallstreetbets-ner`](https://huggingface.co/datasets/StephanAkkerman/wallstreetbets-ner).
+
 ## Pipeline
 
 ```
