@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 augmented/
 kaggle_wsb.csv
+docs/
 
 models/
 # C extensions
