@@ -2,11 +2,16 @@
 
 Training pipeline and labeled data for the GLiNER2 adapter behind [`stock-recognizer`](https://github.com/StephanAkkerman/stock-recognizer)'s `recognize_ai()` — scraping, cleaning, labeling, augmentation, training, benchmarking, and publishing to the Hugging Face Hub.
 
+- Trained adapters are published to [`StephanAkkerman/stock-recognizer-model`](https://huggingface.co/StephanAkkerman/stock-recognizer-model) on the Hugging Face Hub, tagged per version — not committed to git.
+
+- Dataset exports are also pushed to the Hugging Face Hub to [`StephanAkkerman/wallstreetbets-ner`](https://huggingface.co/datasets/StephanAkkerman/wallstreetbets-ner).
+
 ## Relationship to `stock-recognizer`
 
 - The trained adapter is used **by** the engine repo at inference time.
 - Several scripts here import `stock_recognizer` directly (its regex + market-data logic) to build/evaluate datasets. Install it as an editable sibling dependency:
 
+## Setup
 ```bash
 pip install -e ../stock-recognizer
 pip install -r requirements.txt
@@ -17,10 +22,6 @@ Install torch with CUDA separately if you want to train on GPU:
 ```bash
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
 ```
-
-- Trained adapters are published to [`StephanAkkerman/stock-recognizer-model`](https://huggingface.co/StephanAkkerman/stock-recognizer-model) on the Hugging Face Hub, tagged per version — not committed to git.
-
-- Dataset exports are also pushed to the Hugging Face Hub to [`StephanAkkerman/wallstreetbets-ner`](https://huggingface.co/datasets/StephanAkkerman/wallstreetbets-ner).
 
 ## Pipeline
 
