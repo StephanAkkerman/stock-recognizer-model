@@ -1,0 +1,15 @@
+stock-recognizer @ file:../stock-recognizer
+
+financedatabase>=2.2.0
+pandas
+numpy
+torch
+transformers
+gliner2[local]
+safetensors
+datasets
+huggingface_hub
+rich
+tqdm
+asyncpraw
+python-dotenv
