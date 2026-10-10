@@ -4,7 +4,7 @@ pandas
 numpy
 torch
 transformers
-gliner2[local]
+gliner2[local]>=2
 safetensors
 datasets
 huggingface_hub

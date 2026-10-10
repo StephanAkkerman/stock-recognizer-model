@@ -1,3 +1,18 @@
+"""Train a GLiNER2 LoRA adapter on the Label Studio exports in data/labeled.
+
+    python -m src.core.train                                   # default base (large)
+    python -m src.core.train --base-model gliner2.5-small-v1
+    python -m src.core.train --base-model all                  # every registered base
+
+Refreshes the held-out test split first, then for each base model trains an
+adapter, writes ``models/reddit_adapter_<base>_vN/{best,final}`` plus
+``training_metadata.json`` and ``recognizer_config.json``, and benchmarks the
+result against the test set. All bases share the same data, split and seed so
+their scores are comparable.
+"""
+
+import argparse
+import gc
 import glob
 import hashlib
 import json
@@ -5,13 +20,26 @@ import os
 import random
 import re
 import subprocess
+import sys
 from datetime import datetime, timezone
 
 import numpy as np
 import torch
-from gliner2 import GLiNER2
+from gliner2.processor import WhitespaceTokenSplitter
 from gliner2.training.trainer import GLiNER2Trainer, TrainingConfig
 from rich.console import Console
+
+from src.core.models import (
+    ADAPTER_PREFIX,
+    BASE_MODELS,
+    DEFAULT_BASE,
+    TRAIN_OVERRIDES,
+    adapter_dir_name,
+    adapter_label,
+    load_extractor,
+    parse_adapter_dir,
+    resolve_bases,
+)
 
 console = Console()
 
@@ -19,6 +47,7 @@ SEED = 42
 EARLY_STOPPING = True
 EPOCHS = 10
 VAL_FRACTION = 0.15
+DEFAULT_THRESHOLD = 0.75
 
 ENTITY_DESCRIPTIONS = {
     "ticker": (
@@ -42,23 +71,17 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def get_next_version(models_dir="./models"):
-    """Scans the models directory to determine the next version number."""
+def get_next_version(models_dir="./models", base=DEFAULT_BASE):
+    """Next adapter version number for `base` (versions count per base model).
+
+    Legacy ``reddit_adapter_vN`` folders count as the default base's versions.
+    """
     os.makedirs(models_dir, exist_ok=True)
-    adapters = glob.glob(os.path.join(models_dir, "reddit_adapter*"))
-
     max_v = 0
-    for adapter in adapters:
-        folder_name = os.path.basename(adapter)
-        match = re.search(r"_v(\d+)$", folder_name)
-        if match:
-            v = int(match.group(1))
-            if v > max_v:
-                max_v = v
-        elif folder_name == "reddit_adapter":
-            if 1 > max_v:
-                max_v = 1
-
+    for adapter in glob.glob(os.path.join(models_dir, f"{ADAPTER_PREFIX}*")):
+        parsed = parse_adapter_dir(os.path.basename(adapter))
+        if parsed and parsed[0] == base:
+            max_v = max(max_v, parsed[1])
     return max_v + 1
 
 
@@ -79,7 +102,26 @@ def chunk_text_with_overlap(text, chunk_word_size=150, overlap_words=40):
 
 def entity_in_chunk(entity_text, chunk):
     """Token-aware containment check: matches whole tokens only, $-prefixed tickers included."""
-    return re.search(rf"(?<!\w){re.escape(entity_text)}(?!\w)", chunk) is not None
+    if re.search(rf"(?<!\w){re.escape(entity_text)}(?!\w)", chunk) is None:
+        return False
+    return _contains_tokens(chunk, entity_text)
+
+
+def _word_tokens(text):
+    return [tok for tok, _, _ in WhitespaceTokenSplitter()(text)]
+
+
+def _contains_tokens(chunk, entity_text):
+    """Whether `entity_text` is a run of whole splitter tokens in `chunk`.
+
+    The boundary-architecture bases (GLiNER2.5) raise on a labeled entity they
+    cannot find as whole tokens, so such mentions must be dropped before
+    training. Cashtags are fine: ``$AAPL`` tokenizes as ``$`` + ``aapl``.
+    """
+    needle = _word_tokens(entity_text)
+    hay = _word_tokens(chunk)
+    n = len(needle)
+    return n > 0 and any(hay[i : i + n] == needle for i in range(len(hay) - n + 1))
 
 
 def task_to_samples(task):
@@ -102,7 +144,7 @@ def task_to_samples(task):
     for chunk in chunks:
         chunk_entities_dict = {}
         for label, entity_set in doc_entities.items():
-            valid_ents = [ent for ent in entity_set if entity_in_chunk(ent, chunk)]
+            valid_ents = sorted(e for e in entity_set if entity_in_chunk(e, chunk))
             if valid_ents:
                 chunk_entities_dict[label] = valid_ents
 
@@ -239,6 +281,7 @@ def _summarise_labeled_file(fp):
 
 
 def gather_training_metadata(
+    base,
     config,
     train_count,
     val_count,
@@ -306,6 +349,7 @@ def gather_training_metadata(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "git_commit": _git_commit(),
         "seed": SEED,
+        "base_model": BASE_MODELS[base]["hf_id"],
         "config": {
             "num_epochs": config.num_epochs,
             "batch_size": config.batch_size,
@@ -332,24 +376,48 @@ def gather_training_metadata(
     }
 
 
-if __name__ == "__main__":
-    set_seed(SEED)
+def _finalize_adapter_files(output_dir, base, version):
+    """Post-process every saved checkpoint so it can be published as-is.
 
-    # Refresh the held-out test split before loading training data so any
-    # newly added labeled_*.json gets its ~15% stratified slice held out
-    # automatically. Deterministic via the same SEED, so the split is
-    # reproducible across runs as long as the source files don't change.
-    from src.maintenance.split_test_set import run as refresh_test_split
+    Sets ``task_type`` to TOKEN_CLS in ``adapter_config.json`` (Hub compliance)
+    and drops a ``recognizer_config.json`` recording the base model and default
+    threshold, enough for a consumer to load the adapter without this repo.
+    """
+    for sub in ("best", "final"):
+        folder = os.path.join(output_dir, sub)
+        if not os.path.isdir(folder):
+            continue
+        adapter_config_path = os.path.join(folder, "adapter_config.json")
+        if os.path.exists(adapter_config_path):
+            with open(adapter_config_path, "r", encoding="utf-8") as f:
+                adapter_config = json.load(f)
+            adapter_config["task_type"] = "TOKEN_CLS"
+            with open(adapter_config_path, "w", encoding="utf-8") as f:
+                json.dump(adapter_config, f, indent=2)
+        with open(
+            os.path.join(folder, "recognizer_config.json"), "w", encoding="utf-8"
+        ) as f:
+            json.dump(
+                {
+                    "base_model": BASE_MODELS[base]["hf_id"],
+                    "adapter_version": version,
+                    "labels": list(ENTITY_DESCRIPTIONS),
+                    "entity_descriptions": ENTITY_DESCRIPTIONS,
+                    "threshold": DEFAULT_THRESHOLD,
+                },
+                f,
+                indent=2,
+            )
 
-    console.print("[bold cyan]Refreshing stratified test split...[/bold cyan]")
-    refresh_test_split(seed=SEED)
 
-    next_version = get_next_version()
-    adapter_name = f"reddit_adapter_v{next_version}"
-    output_dir = f"./models/{adapter_name}"
+def train_one(base, compile_model=True):
+    """Train, finalize and benchmark one adapter for `base`."""
+    from src.core.benchmark import locate_adapter_weights
 
+    next_version = get_next_version(base=base)
+    output_dir = f"./models/{adapter_dir_name(base, next_version)}"
     console.print(
-        f"[bold cyan]Initializing Training Run for: v{next_version}[/bold cyan]"
+        f"[bold cyan]Training {BASE_MODELS[base]['hf_id']} -> v{next_version}[/bold cyan]"
     )
 
     labeled_folder = "data/labeled"
@@ -362,67 +430,62 @@ if __name__ == "__main__":
         f"[bold green]Train: {len(train_data)} samples | Val: {len(val_data)} samples[/bold green]"
     )
 
-    base_model = GLiNER2.from_pretrained("fastino/gliner2-large-v1")
-    model = torch.compile(base_model)
+    hp = {
+        "batch_size": 4,
+        "lora_rank": 32,
+        "encoder_lr": 2e-5,
+        "task_lr": 5e-4,
+        "epochs": EPOCHS,
+        **TRAIN_OVERRIDES[base],
+    }
+    effective_batch_size = hp["batch_size"] * 2
 
-    BATCH_SIZE = 4
-    EFFECTIVE_BATCH_SIZE = BATCH_SIZE * 2
-    GRADIENT_ACCUMULATION_STEPS = EFFECTIVE_BATCH_SIZE // BATCH_SIZE
-    LORA_RANK = 32
+    base_model = load_extractor(base)
+    model = torch.compile(base_model) if compile_model else base_model
 
     config = TrainingConfig(
         output_dir=output_dir,
-        experiment_name=f"fintwit_lora_v{next_version}",
-        num_epochs=EPOCHS,
-        batch_size=BATCH_SIZE,
+        experiment_name=f"fintwit_lora_{base}_v{next_version}",
+        num_epochs=hp["epochs"],
+        batch_size=hp["batch_size"],
         max_len=256,  # could try 384 to prevent truncation
-        gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
-        encoder_lr=2e-5,
-        task_lr=5e-4,
+        gradient_accumulation_steps=effective_batch_size // hp["batch_size"],
+        encoder_lr=hp["encoder_lr"],
+        task_lr=hp["task_lr"],
         max_grad_norm=1.0,
         use_lora=True,
-        lora_r=LORA_RANK,
-        lora_alpha=LORA_RANK * 2,
+        lora_r=hp["lora_rank"],
+        lora_alpha=hp["lora_rank"] * 2,
         lora_dropout=0.1,
         lora_target_modules=["encoder"],
         save_adapter_only=True,
         fp16=False,
-        bf16=True,
+        bf16=torch.cuda.is_available(),
         seed=SEED,
         # Early stopping IS necessary here. v9 (25 epochs, no early stop, w/
         # 55 hard negatives) collapsed to "predict nothing" by step ~6000 —
         # all intermediate checkpoints from 6000 onward score 0% F1. The
         # negatives dominate the gradient once training runs long enough.
-        # Patience=3 stops on the noisy val signal, but stopping early is
-        # better than collapse.
         early_stopping=EARLY_STOPPING,
         early_stopping_patience=5,
+        # Windows spawns DataLoader workers, which cannot pickle the tokenizer.
+        **({"num_workers": 0} if os.name == "nt" else {}),
     )
 
     trainer = GLiNER2Trainer(model=model, config=config)
     trainer.train(train_data=train_data, eval_data=val_data)
+    console.print(f"[bold green]Adapter saved to {output_dir}/final/[/bold green]")
 
-    console.print(
-        f"[bold green]v{next_version} Adapter trained and saved to {output_dir}/final/[/bold green]"
-    )
-
-    # Fix task_type in adapter_config.json for HuggingFace Hub compliance
-    adapter_config_path = os.path.join(output_dir, "final", "adapter_config.json")
-    if os.path.exists(adapter_config_path):
-        with open(adapter_config_path, "r", encoding="utf-8") as f:
-            adapter_config = json.load(f)
-        adapter_config["task_type"] = "TOKEN_CLS"
-        with open(adapter_config_path, "w", encoding="utf-8") as f:
-            json.dump(adapter_config, f, indent=2)
-        console.print("[cyan]Set task_type to TOKEN_CLS in adapter_config.json[/cyan]")
+    _finalize_adapter_files(output_dir, base, next_version)
 
     # Snapshot the full training context next to the adapter so re-benchmark
     # runs months later still know which data + config produced this version.
     metadata = gather_training_metadata(
+        base,
         config,
         train_count=len(train_data),
         val_count=len(val_data),
-        effective_batch_size=EFFECTIVE_BATCH_SIZE,
+        effective_batch_size=effective_batch_size,
         labeled_folder=labeled_folder,
         test_folder=test_folder,
         augmented_folder=augmented_folder,
@@ -432,22 +495,65 @@ if __name__ == "__main__":
         json.dump(metadata, f, indent=2)
     console.print(f"[cyan]Wrote training metadata to {metadata_path}[/cyan]")
 
-    # Benchmark the freshly trained adapter and persist the result so the
-    # next ``python src/core/benchmark.py`` run can short-circuit this version.
-    from src.core.benchmark import benchmark_adapter, locate_adapter_weights
-
-    adapter_final = locate_adapter_weights(output_dir)
-    if adapter_final is None:
+    if locate_adapter_weights(output_dir) is None:
         console.print(
             f"[yellow]No adapter weights found under {output_dir}; "
             "skipping post-train benchmark.[/yellow]"
         )
-        raise SystemExit(0)
-    adapter_label = f"GLiNER2 Large + Adapter v{next_version}"
-    console.print(f"[cyan]Benchmarking {adapter_label}...[/cyan]")
-    metrics, test_hash = benchmark_adapter(adapter_label, adapter_final)
-    overall = metrics["overall"]
-    console.print(
-        f"[bold]{adapter_label}[/bold] vs test set [yellow]{test_hash}[/yellow]: "
-        f"P={overall['p']:.2%}  R={overall['r']:.2%}  F1={overall['f1']:.2%}"
+        return
+
+    # Free the training copy before the benchmark loads its own.
+    del trainer, model, base_model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # A fresh process rather than benchmark_adapter(): state left behind by
+    # training (torch.compile, trainer hooks) has been seen to poison inference.
+    console.print(f"[cyan]Benchmarking {adapter_label(base, next_version)}...[/cyan]")
+    result = subprocess.run(
+        [sys.executable, "-m", "src.core.benchmark", "--base-model", base],
+        check=False,
     )
+    if result.returncode != 0:
+        console.print(
+            "[bold red]Benchmark failed; rerun "
+            f"`python -m src.core.benchmark --base-model {base}`.[/bold red]"
+        )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--base-model",
+        default=DEFAULT_BASE,
+        help="Slug, Hub id, comma-separated list, or 'all' (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--no-compile",
+        action="store_true",
+        help="Skip torch.compile (e.g. on CPU or if compilation fails).",
+    )
+    args = parser.parse_args()
+    bases = resolve_bases(args.base_model)
+
+    if not torch.cuda.is_available():
+        console.print("[bold red]CUDA is not available. Exiting.[/bold red]")
+        return
+
+    # Refresh the held-out test split before loading training data so any
+    # newly added labeled_*.json gets its ~15% stratified slice held out
+    # automatically. Deterministic via the same SEED, so every base trains on
+    # the same data and is scored on the same test set.
+    from src.maintenance.split_test_set import run as refresh_test_split
+
+    console.print("[bold cyan]Refreshing stratified test split...[/bold cyan]")
+    refresh_test_split(seed=SEED)
+
+    for base in bases:
+        set_seed(SEED)
+        train_one(base, compile_model=not args.no_compile)
+
+
+if __name__ == "__main__":
+    main()

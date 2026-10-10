@@ -8,36 +8,25 @@ import pandas as pd
 
 from stock_recognizer.engine import StockRecognizer
 
+from src.core.models import ADAPTER_PREFIX, DEFAULT_BASE, parse_adapter_dir
 
-def get_latest_adapter_path(models_dir="./models"):
-    """Scans the models directory and returns the path to the highest version adapter."""
+
+def get_latest_adapter_path(models_dir="./models", base=DEFAULT_BASE):
+    """Scans the models directory and returns the path to the highest version
+    adapter trained on `base` (the engine loads the default, large base)."""
     if not os.path.exists(models_dir):
         return None
 
-    # Find all adapter folders (e.g., reddit_adapter, reddit_adapter_v2)
-    adapters = glob.glob(os.path.join(models_dir, "reddit_adapter*"))
-
-    if not adapters:
+    candidates = []
+    for folder in glob.glob(os.path.join(models_dir, f"{ADAPTER_PREFIX}*")):
+        parsed = parse_adapter_dir(os.path.basename(folder))
+        if parsed and parsed[0] == base:
+            candidates.append((parsed[1], folder))
+    if not candidates:
         return None
 
-    def extract_version(folder_path):
-        folder_name = os.path.basename(folder_path)
-        # If it has a '_v', extract the number
-        if "_v" in folder_name:
-            try:
-                return int(folder_name.split("_v")[-1])
-            except ValueError:
-                return 1
-        # If no '_v' (the original v1), treat as version 1
-        return 1
-
-    # Sort the folders descending based on their extracted version number
-    adapters.sort(key=extract_version, reverse=True)
-
-    # The first item is now the highest version
-    latest_folder = adapters[0]
+    latest_folder = max(candidates)[1]
     final_path = os.path.join(latest_folder, "final")
-
     if os.path.exists(final_path):
         print(f"[Info] Found latest adapter: {final_path}")
         return final_path

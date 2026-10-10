@@ -41,15 +41,19 @@ scraper.py → CSV → cleaner.py → preds/ → Label Studio (manual review) �
 # Run all tests
 pytest
 
-# Benchmark all adapter versions under models/
-python src/core/benchmark.py
+# Train an adapter (one base, a list, or `all`: gliner2-large-v1, gliner2-base-v1, gliner2.5-base-v1, gliner2.5-small-v1)
+python -m src.core.train --base-model gliner2-base-v1
+
+# Benchmark the latest adapter of every base model (--all-versions for every version)
+python -m src.core.benchmark
 
 # Fix label-policy violations in annotated data
 python src/maintenance/fix_label_policy.py          # preview changes
 python src/maintenance/fix_label_policy.py --apply  # apply fixes
 
 # Publish a trained adapter to the Hugging Face Hub
-python utils/hf/push_model_to_hf.py models/reddit_adapter_v18/final --version v18
+python -m utils.hf.push_model_to_hf models/reddit_adapter_v18/final   # tags v18
+python -m utils.hf.push_model_to_hf --best                           # best adapter of every base
 ```
 
 ## Trainer organization

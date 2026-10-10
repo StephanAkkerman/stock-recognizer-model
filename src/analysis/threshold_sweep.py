@@ -1,7 +1,7 @@
 """Sweep the decision threshold across all adapters on the held-out test set.
 
 Run:
-    python src/analysis/threshold_sweep.py
+    python -m src.analysis.threshold_sweep [--base-model gliner2-base-v1|all]
 
 Prints one Rich table per adapter showing precision / recall / F1 at each
 threshold, with the F1-optimal row marked. Intended for picking the operating
@@ -13,7 +13,7 @@ were tuned against. Sweeping is the cheap way to compare versions at each
 model's own best operating point.
 """
 
-import copy
+import argparse
 import os
 
 import torch
@@ -36,6 +36,7 @@ from src.core.benchmark import (
     parse_all_label_studio_exports,
     prepare_eval_inputs,
 )
+from src.core.models import DEFAULT_BASE, base_label, load_adapted, resolve_bases
 
 console = Console()
 
@@ -99,6 +100,15 @@ def _render(name, rows):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--base-model",
+        default=DEFAULT_BASE,
+        help="Slug, Hub id, comma-separated list or 'all' of bases to sweep (default: %(default)s).",
+    )
+    args = parser.parse_args()
+    bases = resolve_bases(args.base_model)
+
     dataset = parse_all_label_studio_exports(DEFAULT_TEST_FOLDER)
     if not dataset:
         console.print(f"[red]No test data in {DEFAULT_TEST_FOLDER}.[/red]")
@@ -114,16 +124,6 @@ if __name__ == "__main__":
         f"thresholds: {THRESHOLDS[0]}..{THRESHOLDS[-1]} ({len(THRESHOLDS)} steps)"
     )
 
-    base_model, device = load_base_model()
-    console.print(
-        f"[cyan]Base GLiNER2 loaded on [bold]{device}[/bold]"
-        f"{' (fp16)' if device == 'cuda' else ''}.[/cyan]"
-    )
-
-    configs = [("Base Model (Clean)", None)]
-    for a in get_all_adapters():
-        configs.append((a["name"], a["path"]))
-
     all_results = []
     with Progress(
         TextColumn("[progress.description]{task.description}"),
@@ -131,31 +131,44 @@ if __name__ == "__main__":
         TaskProgressColumn(),
         TimeRemainingColumn(),
     ) as progress:
-        overall_task = progress.add_task(
-            "[bold cyan]Sweeping...", total=len(configs) * len(THRESHOLDS)
-        )
-        for name, adapter_path in configs:
-            if adapter_path and os.path.exists(adapter_path):
-                model = copy.deepcopy(base_model)
-                model.load_adapter(adapter_path)
-            else:
-                model = base_model
-
-            rows = sweep_adapter(
-                model,
-                flat_chunks,
-                doc_chunk_ranges,
-                gold_per_doc,
-                gold_by_label_per_doc,
-                THRESHOLDS,
-                progress_ctx=(progress, overall_task),
+        for base in bases:
+            base_model, device = load_base_model(base)
+            console.print(
+                f"[cyan]{base} loaded on [bold]{device}[/bold]"
+                f"{' (fp16)' if device == 'cuda' else ''}.[/cyan]"
             )
-            all_results.append((name, rows))
 
-            if model is not base_model:
-                del model
-                if device == "cuda":
-                    torch.cuda.empty_cache()
+            configs = [(base_label(base), None)]
+            for a in get_all_adapters(bases=[base]):
+                configs.append((a["name"], a["path"]))
+
+            overall_task = progress.add_task(
+                f"[bold cyan]Sweeping {base}...", total=len(configs) * len(THRESHOLDS)
+            )
+            for name, adapter_path in configs:
+                if adapter_path and os.path.exists(adapter_path):
+                    model = load_adapted(base_model, adapter_path)
+                else:
+                    model = base_model
+
+                rows = sweep_adapter(
+                    model,
+                    flat_chunks,
+                    doc_chunk_ranges,
+                    gold_per_doc,
+                    gold_by_label_per_doc,
+                    THRESHOLDS,
+                    progress_ctx=(progress, overall_task),
+                )
+                all_results.append((name, rows))
+
+                if model is not base_model:
+                    del model
+                    if device == "cuda":
+                        torch.cuda.empty_cache()
+            del base_model
+            if device == "cuda":
+                torch.cuda.empty_cache()
 
     for name, rows in all_results:
         console.print(_render(name, rows))

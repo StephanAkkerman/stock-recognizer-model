@@ -1,11 +1,22 @@
-import copy
+"""Benchmark GLiNER2 adapters on the held-out test set.
+
+    python -m src.core.benchmark                              # every base model, latest adapter each
+    python -m src.core.benchmark --base-model gliner2.5-small-v1
+    python -m src.core.benchmark --all-versions               # every adapter version
+    python -m src.core.benchmark --no-cache                   # ignore cached results
+    python -m src.core.benchmark --engine                     # also score via StockRecognizer
+
+Scoring is set-based and deduplicated per document (see ``normalize_entity``).
+Results are cached per ``(adapter, test_set_hash)`` in ``models/benchmark_results.json``.
+"""
+
+import argparse
 import glob
 import json
 import os
 import re
+import time
 
-import torch
-from gliner2 import GLiNER2
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -16,6 +27,17 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from src.core.models import (
+    ADAPTER_PREFIX,
+    BASE_MODELS,
+    DEFAULT_BASE,
+    adapter_label,
+    base_label,
+    load_adapted,
+    load_extractor,
+    parse_adapter_dir,
+    resolve_bases,
+)
 from src.core.results_store import (
     compute_test_set_hash,
     derive_adapter_params,
@@ -49,38 +71,45 @@ def locate_adapter_weights(adapter_dir):
     return None
 
 
-def get_all_adapters(models_dir="./models"):
-    """Scans the models directory and returns a sorted list of all valid adapters."""
+def get_all_adapters(models_dir="./models", bases=None):
+    """Scan `models_dir` for trained adapters, sorted by (base, version).
+
+    `bases` is an optional list of base-model slugs to keep. Each entry is
+    ``{"base", "version", "name", "path"}``; `path` points at the best/final
+    weights folder. Legacy ``reddit_adapter[_vN]`` folders count as the
+    default base.
+    """
     if not os.path.exists(models_dir):
         return []
 
-    adapters = glob.glob(os.path.join(models_dir, "reddit_adapter*"))
-    valid_adapters = []
-
-    for adapter_dir in adapters:
+    found = []
+    for adapter_dir in glob.glob(os.path.join(models_dir, f"{ADAPTER_PREFIX}*")):
+        parsed = parse_adapter_dir(os.path.basename(adapter_dir))
         weights_path = locate_adapter_weights(adapter_dir)
-        if weights_path is None:
+        if parsed is None or weights_path is None:
             continue
-
-        folder_name = os.path.basename(adapter_dir)
-        match = re.search(r"_v(\d+)$", folder_name)
-        if match:
-            v = int(match.group(1))
-        elif folder_name == "reddit_adapter":
-            v = 1
-        else:
+        slug, version = parsed
+        if bases is not None and slug not in bases:
             continue
-
-        valid_adapters.append(
+        found.append(
             {
-                "version": v,
-                "name": f"GLiNER2 Large + Adapter v{v}",
+                "base": slug,
+                "version": version,
+                "name": adapter_label(slug, version),
                 "path": weights_path,
             }
         )
 
-    valid_adapters.sort(key=lambda x: x["version"])
-    return valid_adapters
+    found.sort(key=lambda a: (list(BASE_MODELS).index(a["base"]), a["version"]))
+    return found
+
+
+def latest_adapters(adapters):
+    """Keep only the highest version per base model."""
+    latest = {}
+    for a in adapters:
+        latest[a["base"]] = a  # input is sorted ascending by version
+    return list(latest.values())
 
 
 def parse_all_label_studio_exports(folder_path):
@@ -214,6 +243,7 @@ def evaluate_model(
 
     metrics_counts = {k: {"tp": 0, "fp": 0, "fn": 0} for k in label_keys}
     metrics_counts["overall"] = {"tp": 0, "fp": 0, "fn": 0}
+    started = time.perf_counter()
 
     progress, task_id = progress_context if progress_context else (None, None)
 
@@ -238,6 +268,8 @@ def evaluate_model(
             sorted_outputs[i + j] = out
         if progress and task_id is not None:
             progress.update(task_id, advance=len(batch))
+
+    elapsed = time.perf_counter() - started
 
     # Restore original chunk order so doc_chunk_ranges indices line up.
     all_outputs = [None] * n
@@ -277,6 +309,11 @@ def evaluate_model(
     final_scores = {"name": model_name}
     for key, counts in metrics_counts.items():
         final_scores[key] = calculate_metrics(counts["tp"], counts["fp"], counts["fn"])
+    # Batched throughput (includes padding/batching effects), not single-request
+    # latency. Comparable across bases on the same device.
+    final_scores["speed"] = {
+        "ms_per_doc": round(1000 * elapsed / max(1, len(doc_chunk_ranges)), 2)
+    }
 
     return final_scores
 
@@ -361,16 +398,21 @@ def prepare_eval_inputs(dataset, label_keys):
     return flat_chunks, doc_chunk_ranges, gold_per_doc, gold_by_label_per_doc
 
 
-def load_base_model(device=None):
-    """Load the base GLiNER2 onto GPU (fp16) when available, else CPU."""
+def load_base_model(base=DEFAULT_BASE, device=None):
+    """Load a base GLiNER2 onto GPU (fp16) when available, else CPU."""
+    import torch
+
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = GLiNER2.from_pretrained(
-        "fastino/gliner2-large-v1",
-        map_location=device,
-        quantize=(device == "cuda"),
-    )
+    model = load_extractor(base, map_location=device, quantize=(device == "cuda"))
     return model, device
+
+
+def _free_cuda(device):
+    if device == "cuda":
+        import torch
+
+        torch.cuda.empty_cache()
 
 
 def _metrics_only(scores):
@@ -383,8 +425,8 @@ def _load_training_metadata(adapter_path):
     """Look for `training_metadata.json` in the adapter's parent dir.
 
     Adapter paths from ``locate_adapter_weights`` look like
-    ``models/reddit_adapter_v14/best`` or ``.../final``, and the metadata
-    sits one level up at ``models/reddit_adapter_v14/training_metadata.json``.
+    ``models/reddit_adapter_gliner2-large-v1_v3/best`` or ``.../final``, and the metadata
+    sits one level up at ``.../training_metadata.json``.
     Returns None silently if the file isn't there (e.g. pre-metadata adapters).
     """
     if not adapter_path:
@@ -449,9 +491,29 @@ def _flatten_metadata_into_params(metadata):
     return flat
 
 
+def _build_params(adapter_path, base, device=None, training_params=None):
+    """Weight-derived facts + persisted training context for one adapter."""
+    params = dict(derive_adapter_params(adapter_path)) if adapter_path else {}
+    params["base_model"] = BASE_MODELS[base]["hf_id"]
+    params["base_params_m"] = BASE_MODELS[base]["params_m"]
+    if device:
+        params["device"] = device
+    # Pull in the persisted training context (written by train.py) so the
+    # benchmark store ends up with full data + config provenance regardless
+    # of whether this benchmark was invoked from train.py or standalone.
+    metadata = _load_training_metadata(adapter_path) if adapter_path else None
+    if metadata:
+        params.update(_flatten_metadata_into_params(metadata))
+    # An explicit training_params dict still wins.
+    if training_params:
+        params.update(training_params)
+    return params
+
+
 def benchmark_adapter(
     name,
     adapter_path,
+    base=DEFAULT_BASE,
     training_params=None,
     test_folder=DEFAULT_TEST_FOLDER,
     labels=None,
@@ -481,15 +543,13 @@ def benchmark_adapter(
         prepare_eval_inputs(dataset, label_keys)
     )
 
-    owns_base = base_model is None
-    if owns_base:
-        base_model, device = load_base_model(device)
+    if base_model is None:
+        base_model, device = load_base_model(base, device)
     elif device is None:
         device = next(base_model.parameters()).device.type
 
     if adapter_path and os.path.exists(adapter_path):
-        model = copy.deepcopy(base_model)
-        model.load_adapter(adapter_path)
+        model = load_adapted(base_model, adapter_path)
     else:
         model = base_model
 
@@ -505,25 +565,18 @@ def benchmark_adapter(
     )
     metrics = _metrics_only(scores)
 
-    params = dict(derive_adapter_params(adapter_path)) if adapter_path else {}
-    # Pull in the persisted training context (written by train.py) so the
-    # benchmark store ends up with full data + config provenance regardless
-    # of whether this benchmark was invoked from train.py or standalone.
-    metadata = _load_training_metadata(adapter_path) if adapter_path else None
-    if metadata:
-        params.update(_flatten_metadata_into_params(metadata))
-    # An explicit training_params dict still wins (used by tests or callers
-    # that want to override what's on disk).
-    if training_params:
-        params.update(training_params)
-
-    put_result(store, name, test_hash, metrics, params=params)
+    put_result(
+        store,
+        name,
+        test_hash,
+        metrics,
+        params=_build_params(adapter_path, base, device, training_params),
+    )
     save_store(store)
 
     if model is not base_model:
         del model
-        if device == "cuda":
-            torch.cuda.empty_cache()
+        _free_cuda(device)
 
     return metrics, test_hash
 
@@ -569,8 +622,9 @@ def _render_params(rows):
     """Side table summarising the non-metric facts we track per adapter."""
     table = Table(title="Adapter parameters", show_lines=False)
     table.add_column("Model", style="cyan", width=35)
-    table.add_column("lora_b_norm", justify="right")
-    table.add_column("size (KB)", justify="right")
+    table.add_column("base (M params)", justify="right")
+    table.add_column("adapter (KB)", justify="right")
+    table.add_column("ms / doc", justify="right")
     table.add_column("epochs", justify="right")
     table.add_column("train / val", justify="right")
 
@@ -581,24 +635,80 @@ def _render_params(rows):
         split = (
             f"{train_n} / {val_n}" if train_n is not None and val_n is not None else "—"
         )
+        speed = (row["metrics"].get("speed") or {}).get("ms_per_doc", "—")
+        device = f" ({p['device']})" if p.get("device") and speed != "—" else ""
         table.add_row(
             row["name"],
-            f"{p.get('lora_b_norm', '—')}",
+            f"{p.get('base_params_m', '—')}",
             f"{p.get('adapter_size_kb', '—')}",
+            f"{speed}{device}",
             f"{p.get('num_epochs', '—')}",
             split,
         )
     return table
 
 
-if __name__ == "__main__":
-    import argparse
+def _render_engine_table(adapters, store, test_hash, dataset, args):
+    """Score adapters through StockRecognizer.recognize_ai() (production F1)."""
+    console.print(
+        "\n[cyan]Engine evaluation (StockRecognizer.recognize_ai + regex)...[/cyan]"
+    )
+    table = Table(title="Engine Benchmark (production F1)", show_lines=False)
+    table.add_column("Adapter", style="cyan", width=35)
+    table.add_column("Precision", justify="right")
+    table.add_column("Recall", justify="right")
+    table.add_column("F1", style="bold magenta", justify="right")
 
-    parser = argparse.ArgumentParser()
+    store_dirty = False
+    for adapter in adapters:
+        entry = store["results"].get(adapter["name"], {}).get(test_hash)
+        if (
+            entry
+            and entry.get("engine_metrics")
+            and not args.no_cache
+            and not args.no_engine_cache
+        ):
+            eng_metrics = entry["engine_metrics"]
+            console.print(
+                f"  [dim]{adapter['name']}: using cached engine metrics[/dim]"
+            )
+        else:
+            console.print(f"  [dim]Loading engine for {adapter['name']}...[/dim]")
+            eng_metrics = engine_evaluate_model(
+                adapter["path"], dataset, model_name=adapter["name"]
+            )
+            if entry:
+                entry["engine_metrics"] = eng_metrics
+                store_dirty = True
+
+        m = eng_metrics["overall"]
+        table.add_row(
+            adapter["name"], f"{m['p']:.2%}", f"{m['r']:.2%}", f"{m['f1']:.2%}"
+        )
+
+    if store_dirty:
+        save_store(store)
+    console.print(table)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--base-model",
+        default="all",
+        help="Slug, Hub id, comma-separated list, or 'all' (default).",
+    )
+    parser.add_argument(
+        "--all-versions",
+        action="store_true",
+        help="Show every adapter version per base instead of only the latest "
+        "(older versions come from the cache, so listing them is cheap).",
+    )
     parser.add_argument(
         "--engine",
         action="store_true",
-        help="Evaluate via StockRecognizer.recognize_ai() instead of raw model",
+        help="Evaluate via StockRecognizer.recognize_ai() instead of raw model "
+        "(default base only: the engine loads that base).",
     )
     parser.add_argument(
         "--no-cache",
@@ -613,80 +723,82 @@ if __name__ == "__main__":
         "Use after changing engine code (AMBIGUOUS_WORDS, resolution logic, etc.). "
         "Much faster than --no-cache: NER inference results are still read from cache.",
     )
+    parser.add_argument("--batch-size", type=int, default=32)
     args = parser.parse_args()
 
-    NUM_VERSIONS_TO_TEST = 1  # None = test all adapters
-    BATCH_SIZE = 32
-
     dataset = parse_all_label_studio_exports(DEFAULT_TEST_FOLDER)
-
     if not dataset:
         console.print("[red]No valid data to evaluate.[/red]")
-    else:
-        test_hash = compute_test_set_hash(dataset)
-        console.print(
-            f"Loaded [bold green]{len(dataset)}[/bold green] annotated tasks "
-            f"from {DEFAULT_TEST_FOLDER}. test-set hash: [yellow]{test_hash}[/yellow]"
-        )
+        raise SystemExit(1)
 
-        store = load_store()
-        register_test_set(store, test_hash, dataset, source_folder=DEFAULT_TEST_FOLDER)
+    test_hash = compute_test_set_hash(dataset)
+    console.print(
+        f"Loaded [bold green]{len(dataset)}[/bold green] annotated tasks "
+        f"from {DEFAULT_TEST_FOLDER}. test-set hash: [yellow]{test_hash}[/yellow]"
+    )
 
-        label_keys = list(DEFAULT_LABELS.keys())
-        flat_chunks, doc_chunk_ranges, gold_per_doc, gold_by_label_per_doc = (
-            prepare_eval_inputs(dataset, label_keys)
-        )
-        console.print(
-            f"Prepared [bold green]{len(flat_chunks)}[/bold green] chunks "
-            f"across {len(dataset)} documents."
-        )
+    store = load_store()
+    register_test_set(store, test_hash, dataset, source_folder=DEFAULT_TEST_FOLDER)
 
-        model_configs = [("Base Model (Clean)", None)]
-        available_adapters = get_all_adapters()
-        if NUM_VERSIONS_TO_TEST and len(available_adapters) > NUM_VERSIONS_TO_TEST:
-            available_adapters = available_adapters[-NUM_VERSIONS_TO_TEST:]
-        for adapter in available_adapters:
-            model_configs.append((adapter["name"], adapter["path"]))
+    label_keys = list(DEFAULT_LABELS)
+    flat_chunks, doc_chunk_ranges, gold_per_doc, gold_by_label_per_doc = (
+        prepare_eval_inputs(dataset, label_keys)
+    )
+    console.print(
+        f"Prepared [bold green]{len(flat_chunks)}[/bold green] chunks "
+        f"across {len(dataset)} documents."
+    )
 
-        # Separate cache hits from the configs we still need to run.
-        rows = []
-        to_evaluate = []
-        for name, adapter_path in model_configs:
-            cached = None if args.no_cache else get_cached(store, name, test_hash)
-            if cached:
-                rows.append(
-                    {
-                        "name": name,
-                        "metrics": cached["metrics"],
-                        "params": cached.get("params") or {},
-                        "cached": True,
-                    }
-                )
-            else:
-                to_evaluate.append((name, adapter_path))
+    bases = resolve_bases(args.base_model)
+    adapters = get_all_adapters(bases=bases)
+    if not args.all_versions:
+        adapters = latest_adapters(adapters)
 
-        if to_evaluate:
-            shared_base_model, device = load_base_model()
-            console.print(
-                f"[cyan]Loaded base GLiNER2 onto [bold]{device}[/bold]"
-                f"{' (fp16)' if device == 'cuda' else ''}. "
-                f"Need to evaluate {len(to_evaluate)}/{len(model_configs)} configs.[/cyan]"
+    # (base, display name, adapter path) in display order.
+    configs = []
+    for base in bases:
+        configs.append((base, base_label(base), None))
+        configs += [
+            (a["base"], a["name"], a["path"]) for a in adapters if a["base"] == base
+        ]
+
+    # Separate cache hits from the configs we still need to run.
+    rows = []
+    to_evaluate = []
+    for base, name, adapter_path in configs:
+        cached = None if args.no_cache else get_cached(store, name, test_hash)
+        if cached:
+            rows.append(
+                {
+                    "name": name,
+                    "metrics": cached["metrics"],
+                    "params": cached.get("params") or {},
+                    "cached": True,
+                }
             )
+        else:
+            to_evaluate.append((base, name, adapter_path))
 
-            with Progress(
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                TimeRemainingColumn(),
-            ) as progress:
-                overall_task = progress.add_task(
-                    "[bold cyan]Overall Evaluation...", total=len(to_evaluate)
+    if to_evaluate:
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+        ) as progress:
+            overall_task = progress.add_task(
+                "[bold cyan]Overall Evaluation...", total=len(to_evaluate)
+            )
+            # Load each base once and evaluate all of its configs before moving on.
+            for base in dict.fromkeys(b for b, _, _ in to_evaluate):
+                shared_base_model, device = load_base_model(base)
+                console.print(
+                    f"[cyan]Loaded [bold]{BASE_MODELS[base]['hf_id']}[/bold] onto "
+                    f"[bold]{device}[/bold].[/cyan]"
                 )
-
-                for name, adapter_path in to_evaluate:
+                for _, name, adapter_path in [c for c in to_evaluate if c[0] == base]:
                     if adapter_path and os.path.exists(adapter_path):
-                        model = copy.deepcopy(shared_base_model)
-                        model.load_adapter(adapter_path)
+                        model = load_adapted(shared_base_model, adapter_path)
                     else:
                         model = shared_base_model
 
@@ -701,22 +813,11 @@ if __name__ == "__main__":
                         gold_by_label_per_doc,
                         model_name=name,
                         label_descriptions=DEFAULT_LABELS,
-                        batch_size=BATCH_SIZE,
+                        batch_size=args.batch_size,
                         progress_context=(progress, chunk_task),
                     )
                     metrics = _metrics_only(scores)
-                    params = (
-                        dict(derive_adapter_params(adapter_path))
-                        if adapter_path
-                        else {}
-                    )
-                    # Same metadata merge as benchmark_adapter() — keeps the
-                    # standalone-benchmark code path in sync with the post-train one.
-                    metadata = (
-                        _load_training_metadata(adapter_path) if adapter_path else None
-                    )
-                    if metadata:
-                        params.update(_flatten_metadata_into_params(metadata))
+                    params = _build_params(adapter_path, base, device)
                     put_result(store, name, test_hash, metrics, params=params)
                     rows.append(
                         {
@@ -731,61 +832,27 @@ if __name__ == "__main__":
                     progress.remove_task(chunk_task)
                     if model is not shared_base_model:
                         del model
-                        if device == "cuda":
-                            torch.cuda.empty_cache()
+                del shared_base_model
+                _free_cuda(device)
 
-            save_store(store)
+        save_store(store)
 
-        # Render in the original adapter-version order from model_configs.
-        order = [n for n, _ in model_configs]
-        rows.sort(key=lambda r: order.index(r["name"]))
-        console.print(_render_table(rows))
-        console.print(_render_params(rows))
+    # Render in the original order from configs.
+    order = [name for _, name, _ in configs]
+    rows.sort(key=lambda r: order.index(r["name"]))
+    console.print(_render_table(rows))
+    console.print(_render_params(rows))
 
-        if args.engine:
+    if args.engine:
+        engine_adapters = [a for a in adapters if a["base"] == DEFAULT_BASE]
+        if engine_adapters:
+            _render_engine_table(engine_adapters, store, test_hash, dataset, args)
+        else:
             console.print(
-                "\n[cyan]Engine evaluation (StockRecognizer.recognize_ai + regex)...[/cyan]"
+                f"[yellow]--engine skipped: no {BASE_MODELS[DEFAULT_BASE]['display']} "
+                "adapter selected.[/yellow]"
             )
-            eng_table = Table(
-                title="Engine Benchmark (production F1)", show_lines=False
-            )
-            eng_table.add_column("Adapter", style="cyan", width=35)
-            eng_table.add_column("Precision", justify="right")
-            eng_table.add_column("Recall", justify="right")
-            eng_table.add_column("F1", style="bold magenta", justify="right")
 
-            store_dirty = False
-            for adapter in available_adapters:
-                entry = store["results"].get(adapter["name"], {}).get(test_hash)
-                if (
-                    entry
-                    and entry.get("engine_metrics")
-                    and not args.no_cache
-                    and not args.no_engine_cache
-                ):
-                    eng_metrics = entry["engine_metrics"]
-                    console.print(
-                        f"  [dim]{adapter['name']}: using cached engine metrics[/dim]"
-                    )
-                else:
-                    console.print(
-                        f"  [dim]Loading engine for {adapter['name']}...[/dim]"
-                    )
-                    eng_metrics = engine_evaluate_model(
-                        adapter["path"], dataset, model_name=adapter["name"]
-                    )
-                    if entry:
-                        entry["engine_metrics"] = eng_metrics
-                        store_dirty = True
 
-                m = eng_metrics["overall"]
-                eng_table.add_row(
-                    adapter["name"],
-                    f"{m['p']:.2%}",
-                    f"{m['r']:.2%}",
-                    f"{m['f1']:.2%}",
-                )
-
-            if store_dirty:
-                save_store(store)
-            console.print(eng_table)
+if __name__ == "__main__":
+    main()

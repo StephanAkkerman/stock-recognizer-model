@@ -14,13 +14,13 @@ Usage:
 """
 
 import argparse
-import copy
 from collections import Counter
 
 import torch
 from rich.console import Console
 from rich.table import Table
 
+from src.core.models import DEFAULT_BASE, load_adapted, resolve_base
 from src.analysis.error_analysis import (
     collect_pred_per_doc,
     resolve_adapter,
@@ -225,6 +225,11 @@ def _render_delta_table(title, records, top):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--base-model",
+        default=DEFAULT_BASE,
+        help="Base-model slug or Hub id whose adapters to use (default: %(default)s).",
+    )
+    parser.add_argument(
         "--adapter",
         default="latest",
         help="'latest' (default), 'base', or version like 'v15'.",
@@ -242,7 +247,8 @@ def main():
     )
     args = parser.parse_args()
 
-    adapter_name, adapter_path = resolve_adapter(args.adapter)
+    base = resolve_base(args.base_model)
+    adapter_name, adapter_path = resolve_adapter(args.adapter, base)
     dataset = parse_all_label_studio_exports(args.test_folder)
     if not dataset:
         console.print(f"[red]No annotated tasks found in {args.test_folder}[/red]")
@@ -259,10 +265,9 @@ def main():
         f"{len(flat_chunks)} chunks | threshold={args.threshold}\n"
     )
 
-    base_model, device = load_base_model()
+    base_model, device = load_base_model(base)
     if adapter_path:
-        model = copy.deepcopy(base_model)
-        model.load_adapter(adapter_path)
+        model = load_adapted(base_model, adapter_path)
         del base_model
     else:
         model = base_model
