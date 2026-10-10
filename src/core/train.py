@@ -48,6 +48,9 @@ EARLY_STOPPING = True
 EPOCHS = 10
 VAL_FRACTION = 0.15
 DEFAULT_THRESHOLD = 0.75
+# Word-token cap per training sample (punctuation counts). 256 cut the tail off
+# 150-word chunks, so entities there could not be aligned and collation raised.
+MAX_LEN = 384
 
 ENTITY_DESCRIPTIONS = {
     "ticker": (
@@ -116,10 +119,10 @@ def _contains_tokens(chunk, entity_text):
 
     The boundary-architecture bases (GLiNER2.5) raise on a labeled entity they
     cannot find as whole tokens, so such mentions must be dropped before
-    training. Cashtags are fine: ``$AAPL`` tokenizes as ``$`` + ``aapl``.
+    training, as do entities past the MAX_LEN truncation point. Cashtags are fine: ``$AAPL`` tokenizes as ``$`` + ``aapl``.
     """
     needle = _word_tokens(entity_text)
-    hay = _word_tokens(chunk)
+    hay = _word_tokens(chunk)[:MAX_LEN]  # the trainer truncates to MAX_LEN tokens
     n = len(needle)
     return n > 0 and any(hay[i : i + n] == needle for i in range(len(hay) - n + 1))
 
@@ -448,7 +451,7 @@ def train_one(base, compile_model=True):
         experiment_name=f"fintwit_lora_{base}_v{next_version}",
         num_epochs=hp["epochs"],
         batch_size=hp["batch_size"],
-        max_len=256,  # could try 384 to prevent truncation
+        max_len=MAX_LEN,
         gradient_accumulation_steps=effective_batch_size // hp["batch_size"],
         encoder_lr=hp["encoder_lr"],
         task_lr=hp["task_lr"],

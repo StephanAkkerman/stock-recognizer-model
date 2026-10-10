@@ -112,7 +112,8 @@ def default_repo_id(owner, slug):
     dropped) so a better adapter simply overwrites that repo's contents."""
     if slug == DEFAULT_BASE:
         return f"{owner}/{HUB_REPO_PREFIX}-model"
-    return f"{owner}/{HUB_REPO_PREFIX}-model-{re.sub(r'-v\d+$', '', slug)}"
+    short = re.sub(r"-v\d+$", "", slug)
+    return f"{owner}/{HUB_REPO_PREFIX}-model-{short}"
 
 
 def load_extractor(slug, **kwargs):
