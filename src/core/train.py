@@ -77,7 +77,7 @@ def set_seed(seed):
 def get_next_version(models_dir="./models", base=DEFAULT_BASE):
     """Next adapter version number for `base` (versions count per base model).
 
-    Legacy ``reddit_adapter_vN`` folders count as the default base's versions.
+    Legacy ``reddit_adapter_vN`` folders count as the large base's versions.
     """
     os.makedirs(models_dir, exist_ok=True)
     max_v = 0

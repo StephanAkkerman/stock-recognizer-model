@@ -52,7 +52,7 @@ python src/maintenance/fix_label_policy.py          # preview changes
 python src/maintenance/fix_label_policy.py --apply  # apply fixes
 
 # Publish a trained adapter to the Hugging Face Hub
-python -m utils.hf.push_model_to_hf models/reddit_adapter_v18/final   # tags v18
+python -m utils.hf.push_model_to_hf models/reddit_adapter_v18/final   # large adapter, tags v18
 python -m utils.hf.push_model_to_hf --best                           # best adapter of every base
 ```
 

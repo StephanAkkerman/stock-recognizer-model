@@ -41,7 +41,10 @@ BASE_MODELS = {
         "params_m": 486,
     },
 }
-DEFAULT_BASE = "gliner2-large-v1"
+# What the engine loads.
+DEFAULT_BASE = "gliner2.5-small-v1"
+# Pre-registry adapter folders were all trained on this base.
+LEGACY_BASE = "gliner2-large-v1"
 
 # Per-base training overrides, merged over the defaults in `train.py`
 # (keys: batch_size, lora_rank, encoder_lr, task_lr, epochs). Empty until a
@@ -81,22 +84,22 @@ def adapter_dir_name(slug, version):
 def parse_adapter_dir(folder_name):
     """Adapter folder name -> ``(slug, version)``; ``None`` if not ours.
 
-    Legacy ``reddit_adapter`` / ``reddit_adapter_vN`` folders map to the
-    default (large) base, which is what they were trained on.
+    Legacy ``reddit_adapter`` / ``reddit_adapter_vN`` folders map to
+    `LEGACY_BASE` (large), which is what they were trained on.
     """
     match = _DIR.fullmatch(folder_name)
     if match and match["slug"] in BASE_MODELS:
         return match["slug"], int(match["v"])
     legacy = _LEGACY_DIR.fullmatch(folder_name)
     if legacy:
-        return DEFAULT_BASE, int(legacy["v"] or 1)
+        return LEGACY_BASE, int(legacy["v"] or 1)
     return None
 
 
 def adapter_label(slug, version):
     """Name used in the benchmark store and tables.
 
-    For the default base this equals the pre-registry label
+    For the large base this equals the pre-registry label
     (``GLiNER2 Large + Adapter v7``), so cached benchmark results stay valid.
     """
     return f"{BASE_MODELS[slug]['display']} + Adapter v{version}"
@@ -107,13 +110,10 @@ def base_label(slug):
 
 
 def default_repo_id(owner, slug):
-    """Hub repo for a base. The default base keeps the original repo, which the
-    engine already pins; the others get a ``-<base>`` suffix (their own ``-v1``
-    dropped) so a better adapter simply overwrites that repo's contents."""
-    if slug == DEFAULT_BASE:
-        return f"{owner}/{HUB_REPO_PREFIX}-model"
+    """Hub repo for a base: ``<owner>/stock-recognizer-<slug>``, with the base's
+    own ``-v1`` dropped so a better adapter simply overwrites the repo's contents."""
     short = re.sub(r"-v\d+$", "", slug)
-    return f"{owner}/{HUB_REPO_PREFIX}-model-{short}"
+    return f"{owner}/{HUB_REPO_PREFIX}-{short}"
 
 
 def load_extractor(slug, **kwargs):
@@ -130,7 +130,19 @@ def load_extractor(slug, **kwargs):
 
 
 def load_adapted(base_model, adapter_path):
-    """Copy of `base_model` with the adapter loaded."""
+    """Copy of `base_model` with the adapter loaded.
+
+    Uses ``PeftModel.from_pretrained`` (the adapters are PEFT-native) rather
+    than ``model.load_adapter``: the boundary architecture has no such method,
+    so the call falls through to transformers' PEFT mixin, which fails on it.
+    The LoRA weights are merged so the result is a plain extractor.
+    """
+    from peft import PeftConfig, PeftModel
+
+    # The adapters are saved with ``task_type=TOKEN_CLS``, which makes PEFT
+    # expect a ``classifier`` head in the checkpoint; only LoRA weights exist.
+    config = PeftConfig.from_pretrained(str(adapter_path))
+    config.task_type = None
     model = copy.deepcopy(base_model)
-    model.load_adapter(adapter_path)
-    return model
+    peft_model = PeftModel.from_pretrained(model, str(adapter_path), config=config)
+    return peft_model.merge_and_unload()

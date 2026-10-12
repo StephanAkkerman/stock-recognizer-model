@@ -13,7 +13,7 @@ from src.core.models import ADAPTER_PREFIX, DEFAULT_BASE, parse_adapter_dir
 
 def get_latest_adapter_path(models_dir="./models", base=DEFAULT_BASE):
     """Scans the models directory and returns the path to the highest version
-    adapter trained on `base` (the engine loads the default, large base)."""
+    adapter trained on `base` (the engine loads the default base)."""
     if not os.path.exists(models_dir):
         return None
 
